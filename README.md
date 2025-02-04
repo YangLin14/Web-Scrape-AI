@@ -4,11 +4,24 @@ An AI web scraper using ollama, brightdata, selenium and other libraries.
 ## Environment Setup
 
 1. Clone the repository
-2. Copy `.env.example` to `.env`:
+2. Create and activate a virtual environment named "ai":
+   ```bash
+   # Create virtual environment
+   python -m venv ai
+   
+   # Activate virtual environment
+   # On Windows:
+   ai\Scripts\activate
+   # On macOS/Linux:
+   source ai/bin/activate
+   ```
+
+3. Copy `.env.example` to `.env`:
    ```bash
    cp .env.example .env
    ```
-3. Edit `.env` and add your API keys:
+
+4. Edit `.env` and add your API keys:
    - QUIVER_API_KEY: Your Quiver Quantitative API key
    - GEMINI_API_KEY: Your Google Gemini API key
    - INSTAGRAM_API_KEY: Your Instagram API key
@@ -16,18 +29,47 @@ An AI web scraper using ollama, brightdata, selenium and other libraries.
    - AZURE_API_KEY: Your Azure API key
    - IB configuration (if needed)
 
-4. Install dependencies:
+5. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
-## Security Notes
+## Interactive Brokers Setup
 
-- Never commit `.env` file to version control
-- Keep your API keys secure and rotate them regularly
-- Use environment variables for all sensitive information
+### TWS Workstation Installation
+1. Download TWS Workstation:
+   - Visit [TWS Installation](https://www.interactivebrokers.com/en/trading/tws.php)
+   - Click "Download" for your operating system
+   - Follow the installation wizard
+
+2. Configure TWS:
+   - Launch TWS Workstation
+   - Log in with your IB account
+   - Go to File > Global Configuration > API > Settings
+   - Enable "Enable ActiveX and Socket Clients"
+   - Set Socket port to 7497 (default)
+   - Check "Read-Only API"
+
+**Important**: TWS Workstation must be running and connected when using the IB API functions in this application.
+
+### TWS API Setup
+
+1. Download the TWS API (IBJts) from Interactive Brokers:
+   - Visit [Interactive Brokers TWS API](https://www.interactivebrokers.com/en/trading/ib-api.php)
+   - Click on "Download" in the API section
+   - Download the latest version of "TWS API" for your operating system
+   - Accept the license agreement
+
+2. Extract the IBJts files:
+   - Extract the downloaded zip file
+   - Copy the `IBJts` folder to your project directory
+
+3. Install the IB API Python package:
+   ```bash
+   cd IBJts/source/pythonclient
+   python setup.py install
+   ```
 
 ## Setup
 1. Copy `.env.example` to `.env`
 2. Add your API keys to `.env`
-3. Never commit `.env` file# Web-Scrape-AI

@@ -1,0 +1,5 @@
+.env
+chromedriver
+ai/
+IBJts/
+__pycache__/
