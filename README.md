@@ -39,6 +39,7 @@ An AI web scraper using ollama, brightdata, selenium and other libraries.
 ### TWS Workstation Installation
 1. Download TWS Workstation:
    - Visit [TWS Installation](https://www.interactivebrokers.com/en/trading/tws.php)
+   - Visit [How to Download Trader Workstation](https://www.youtube.com/watch?v=vWEMoxg-V40&list=PLfKEHQhkx9-Z1_BsNTM6pflj7v7dPzZV0) for a step by step guide
    - Click "Download" for your operating system
    - Follow the installation wizard
 
@@ -55,7 +56,7 @@ An AI web scraper using ollama, brightdata, selenium and other libraries.
 ### TWS API Setup
 
 1. Download the TWS API (IBJts) from Interactive Brokers:
-   - Visit [Interactive Brokers TWS API](https://www.interactivebrokers.com/en/trading/ib-api.php)
+   - Visit [Interactive Brokers TWS API](https://interactivebrokers.github.io/#)
    - Click on "Download" in the API section
    - Download the latest version of "TWS API" for your operating system
    - Accept the license agreement
