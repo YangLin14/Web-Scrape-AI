@@ -53,6 +53,10 @@ AZURE_OPENAI_CONFIG = {
     'deployment_name': os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME', 'gpt-4o')
 }
 
+# X (Twitter) Configuration
+X_USERNAME = os.getenv('X_USERNAME')
+X_PASSWORD = os.getenv('X_PASSWORD')
+
 def add_mock_recent_trades(self):
     """Add mock recent trades for testing"""
     for trade in RECENT_TRADES:

@@ -7,7 +7,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
-from config import AZURE_API_KEY, AZURE_OPENAI_CONFIG
+from config import AZURE_API_KEY, AZURE_OPENAI_CONFIG, X_USERNAME, X_PASSWORD
 
 template = """You are an AI financial analyst processing web content. Focus on extracting trading activities, stock prices, and market movements.
 
@@ -90,8 +90,7 @@ class WebScraper:
             username = self.wait.until(
                 EC.presence_of_element_located((By.NAME, "text"))
             )
-            username.send_keys("YuFong35981")
-
+            username.send_keys(X_USERNAME)
 
             # Click next
             next_button = self.wait.until(
@@ -103,7 +102,7 @@ class WebScraper:
             password = self.wait.until(
                 EC.presence_of_element_located((By.NAME, "password"))
             )
-            password.send_keys("=trTwl7QKvQ8fsY")
+            password.send_keys(X_PASSWORD)
 
             # Click login
             login_button = self.wait.until(
