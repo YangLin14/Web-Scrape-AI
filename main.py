@@ -7,12 +7,13 @@ from scrape import (
 )
 from gemini_helper import get_gemini_response, format_table_response, process_image_response, preprocess_query
 from parse import scrape_x, scrape_instagram, scrape_government
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import pandas as pd
 from main_collector import collect_politician_trades
 from politician_trades import PoliticianTradesApp
 from config import GEMINI_API_KEY
+from tiingo_helper import fetch_stock_news, search_tickers, get_news_statistics, save_news_data, fetch_politician_trading_news
 
 # Set page config
 st.set_page_config(
@@ -287,7 +288,7 @@ st.markdown("""
 st.markdown("<h1 class='main-title'>AI Web Scraper & Analyzer</h1>", unsafe_allow_html=True)
 
 # Create tabs for different scraping methods
-tab1, tab2, tab3 = st.tabs(["🌐 Web Scraping", "💬 Analysis & Chat", "📊 Politician Trades"])
+tab1, tab2, tab3, tab4 = st.tabs(["🌐 Web Scraping", "💬 Analysis & Chat", "📊 Politician Trades", "📰 News"])
 
 with tab1:
     # Scraping section
@@ -543,7 +544,7 @@ with tab2:
             st.session_state.chat_history = []
             st.rerun()
 
-# Add the new Politician Trades tab
+# Restore original Politician Trades tab
 with tab3:
     st.markdown("<h3 class='section-title'>Politician Trading Data</h3>", unsafe_allow_html=True)
     
@@ -629,7 +630,7 @@ with tab3:
                     )
                 
                 with search_col2:
-                    # Chamber filter still available but now shows the selected politician's chamber
+                    # Chamber filter still shows the selected politician's chamber
                     chamber = politicians.get(selected_politician, 'Unknown')
                     st.markdown(f"### Chamber\n{chamber}")
                 
@@ -673,6 +674,255 @@ with tab3:
             
     except Exception as e:
         st.error(f"Error loading trading data: {str(e)}")
+
+# Update News tab to include both stock and politician news
+with tab4:
+    st.markdown("<h3 class='section-title'>News Dashboard</h3>", unsafe_allow_html=True)
+    
+    # Create tabs within the News tab
+    news_tab1, news_tab2 = st.tabs(["Stock Market News", "Politician Trading News"])
+    
+    with news_tab1:
+        st.markdown("### Stock Market News")
+        
+        # Create search filters
+        col1, col2, col3 = st.columns([2, 2, 1])
+        
+        with col1:
+            # Stock ticker search with autocomplete
+            ticker_search = st.text_input(
+                "Search stocks:",
+                placeholder="Enter company name or ticker (e.g., AAPL, Tesla)",
+                key="ticker_search"
+            )
+            
+            if ticker_search:
+                results = search_tickers(ticker_search)
+                if results:
+                    ticker_options = [f"{r['ticker']} - {r['name']}" for r in results]
+                    selected_tickers = st.multiselect(
+                        "Select stocks to filter news:",
+                        options=ticker_options,
+                        key="selected_tickers"
+                    )
+                    # Extract just the tickers from selections
+                    selected_ticker_symbols = [t.split(' - ')[0] for t in selected_tickers]
+                else:
+                    st.warning("No matching stocks found")
+                    selected_ticker_symbols = []
+        
+        with col2:
+            # Date range selector
+            days_ago = st.slider(
+                "News from the last X days:",
+                min_value=1,
+                max_value=30,
+                value=7,
+                key="news_days"
+            )
+            start_date = (datetime.now() - timedelta(days=days_ago)).strftime('%Y-%m-%d')
+        
+        with col3:
+            # Number of articles
+            article_limit = st.number_input(
+                "Number of articles:",
+                min_value=5,
+                max_value=50,
+                value=10,
+                key="article_limit"
+            )
+        
+        # Add fetch button
+        if st.button("🔍 Fetch News", key="fetch_stock_news"):
+            with st.spinner("Fetching latest stock market news..."):
+                news_articles = fetch_stock_news(
+                    tickers=selected_ticker_symbols if 'selected_ticker_symbols' in locals() else None,
+                    start_date=start_date,
+                    limit=article_limit
+                )
+                
+                if news_articles:
+                    st.session_state.stock_news = news_articles
+                    st.success(f"✅ Found {len(news_articles)} articles!")
+                else:
+                    st.error("Unable to fetch news articles")
+        
+        # Display stock market news
+        if 'stock_news' in st.session_state and st.session_state.stock_news:
+            for article in st.session_state.stock_news:
+                with st.expander(f"📰 {article.get('title', 'Untitled Article')}", expanded=False):
+                    # Article metadata
+                    st.markdown(f"**Source:** {article.get('source', 'Unknown Source')}")
+                    st.markdown(f"**Published:** {article.get('published_date', 'Unknown Date')}")
+                    
+                    tickers = article.get('tickers', [])
+                    if tickers and isinstance(tickers, list):
+                        st.markdown(f"**Related Stocks:** {', '.join(tickers)}")
+                    
+                    # Article content sections
+                    if article.get('description'):
+                        st.markdown("### Summary")
+                        st.markdown(article['description'])
+                    
+                    if article.get('full_content'):
+                        st.markdown("### Full Article Content")
+                        st.text_area(
+                            "Full Content", 
+                            value=article['full_content'],
+                            height=300,
+                            key=f"stock_content_{article.get('id', datetime.now().isoformat())}"
+                        )
+                    
+                    # Article statistics
+                    st.markdown("### Article Statistics")
+                    stats_col1, stats_col2 = st.columns(2)
+                    with stats_col1:
+                        st.metric("Title Length", article.get('title_length', 0))
+                        st.metric("Description Length", article.get('description_length', 0))
+                    with stats_col2:
+                        st.metric("Full Content Length", article.get('full_content_length', 0))
+                        st.metric("Related Tickers", article.get('ticker_count', 0))
+                    
+                    # Link to original article
+                    if article.get('url'):
+                        st.markdown(f"[Read original article]({article['url']})")
+            
+            # Add statistics and save data section
+            st.markdown("---")
+            st.markdown("### News Data Statistics")
+            
+            # Get and display statistics
+            stats = get_news_statistics(st.session_state.stock_news)
+            if stats:
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Total Articles", stats['total_articles'])
+                    st.metric("Unique Sources", stats['unique_sources'])
+                
+                with col2:
+                    st.metric("Unique Tickers", stats['unique_tickers'])
+                    st.metric("Avg. Article Length", f"{stats['avg_text_length']:.0f}")
+                
+                with col3:
+                    st.metric("Date Range", 
+                        f"{stats['date_range']['start']} to {stats['date_range']['end']}")
+                
+                # Show top tickers and tags
+                st.markdown("#### Top Mentioned Tickers")
+                st.write(stats['top_tickers'])
+                
+                st.markdown("#### Top Tags")
+                st.write(stats['top_tags'])
+            
+            # Add save data button
+            if st.button("💾 Save News Data", key="save_stock_news"):
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"data/stock_news_{timestamp}.csv"
+                
+                saved_file = save_news_data(st.session_state.stock_news, filename)
+                if saved_file:
+                    st.success(f"✅ Successfully saved news data to {saved_file}")
+                    
+                    # Add download button
+                    df = pd.DataFrame(st.session_state.stock_news)
+                    csv = df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download News Data",
+                        data=csv,
+                        file_name=f"stock_news_{timestamp}.csv",
+                        mime="text/csv"
+                    )
+    
+    with news_tab2:
+        st.markdown("### Politician Trading News")
+        
+        # Create search filters
+        news_col1, news_col2 = st.columns([3, 1])
+        
+        with news_col1:
+            politician_news_name = st.text_input(
+                "Search news about politician trading:",
+                value=search_name if 'search_name' in locals() else "",
+                placeholder="Enter politician name (optional)",
+                key="politician_news_name"
+            )
+        
+        with news_col2:
+            news_limit = st.number_input(
+                "Number of articles:",
+                min_value=5,
+                max_value=50,
+                value=10,
+                key="politician_news_limit"
+            )
+        
+        if st.button("🔍 Fetch Trading News", key="fetch_politician_news"):
+            with st.spinner("Fetching news about politician trading..."):
+                news_articles = fetch_politician_trading_news(
+                    politician_name=politician_news_name,
+                    limit=news_limit
+                )
+                
+                if news_articles:
+                    st.session_state.politician_news = news_articles
+                    st.success(f"✅ Found {len(news_articles)} articles!")
+                else:
+                    st.error("Unable to fetch news articles")
+        
+        # Display politician trading news
+        if 'politician_news' in st.session_state and st.session_state.politician_news:
+            for article in st.session_state.politician_news:
+                with st.expander(f"📰 {article.get('title', 'Untitled Article')}", expanded=False):
+                    # Article metadata
+                    st.markdown(f"**Source:** {article.get('source', 'Unknown Source')}")
+                    st.markdown(f"**Published:** {article.get('published_date', 'Unknown Date')}")
+                    
+                    # Article content sections
+                    if article.get('description'):
+                        st.markdown("### Summary")
+                        st.markdown(article['description'])
+                    
+                    if article.get('full_content'):
+                        st.markdown("### Full Article Content")
+                        st.text_area(
+                            "Full Content", 
+                            value=article['full_content'],
+                            height=300,
+                            key=f"pol_content_{article.get('id', datetime.now().isoformat())}"
+                        )
+                    
+                    # Article statistics
+                    st.markdown("### Article Statistics")
+                    stats_col1, stats_col2 = st.columns(2)
+                    with stats_col1:
+                        st.metric("Title Length", article.get('title_length', 0))
+                        st.metric("Description Length", article.get('description_length', 0))
+                    with stats_col2:
+                        st.metric("Full Content Length", article.get('full_content_length', 0))
+                    
+                    # Link to original article
+                    if article.get('url'):
+                        st.markdown(f"[Read original article]({article['url']})")
+            
+            # Add save data button for politician news
+            if st.button("💾 Save News Data", key="save_politician_news"):
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"data/politician_trading_news_{timestamp}.csv"
+                
+                saved_file = save_news_data(st.session_state.politician_news, filename)
+                if saved_file:
+                    st.success(f"✅ Successfully saved news data to {saved_file}")
+                    
+                    # Add download button
+                    df = pd.DataFrame(st.session_state.politician_news)
+                    csv = df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download News Data",
+                        data=csv,
+                        file_name=f"politician_trading_news_{timestamp}.csv",
+                        mime="text/csv"
+                    )
 
 # Close the main div
 st.markdown('</div>', unsafe_allow_html=True)

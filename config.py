@@ -11,6 +11,9 @@ INSTAGRAM_API_KEY = os.getenv('INSTAGRAM_API_KEY')
 X_API_KEY = os.getenv('X_API_KEY')
 AZURE_API_KEY = os.getenv('AZURE_API_KEY')
 
+# Add after other API keys
+TIINGO_API_KEY = os.getenv('TIINGO_API_KEY', '3a6bd429b2668865aac574d478b5caf26395572a')
+
 # IB Configuration
 IB_CONFIG = {
     'host': os.getenv('IB_HOST', '127.0.0.1'),
