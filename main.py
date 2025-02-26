@@ -14,6 +14,8 @@ from main_collector import collect_politician_trades
 from politician_trades import PoliticianTradesApp
 from config import GEMINI_API_KEY
 from tiingo_helper import fetch_stock_news, search_tickers, get_news_statistics, save_news_data, fetch_politician_trading_news
+import requests
+from Federal_Contracts import render_federal_contracts_tab
 
 # Set page config
 st.set_page_config(
@@ -288,7 +290,13 @@ st.markdown("""
 st.markdown("<h1 class='main-title'>AI Web Scraper & Analyzer</h1>", unsafe_allow_html=True)
 
 # Create tabs for different scraping methods
-tab1, tab2, tab3, tab4 = st.tabs(["🌐 Web Scraping", "💬 Analysis & Chat", "📊 Politician Trades", "📰 News"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "🌐 Web Scraping", 
+    "💬 Analysis & Chat", 
+    "📊 Politician Trades", 
+    "📰 News",
+    "🏢 USA Spending"
+])
 
 with tab1:
     # Scraping section
@@ -546,7 +554,7 @@ with tab2:
 
 # Restore original Politician Trades tab
 with tab3:
-    st.markdown("<h3 class='section-title'>Politician Trading Data</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 class='section-title'>Politician Trading Data (US Senate Financial Disclosure)</h3>", unsafe_allow_html=True)
     
     # Create input and scrape section
     input_col1, input_col2 = st.columns([3, 1])
@@ -677,7 +685,7 @@ with tab3:
 
 # Update News tab to include both stock and politician news
 with tab4:
-    st.markdown("<h3 class='section-title'>News Dashboard</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 class='section-title'>News Dashboard (Tiingo)</h3>", unsafe_allow_html=True)
     
     # Create tabs within the News tab
     news_tab1, news_tab2 = st.tabs(["Stock Market News", "Politician Trading News"])
@@ -923,6 +931,11 @@ with tab4:
                         file_name=f"politician_trading_news_{timestamp}.csv",
                         mime="text/csv"
                     )
+
+# Replace the entire USA Spending tab section with:
+with tab5:
+    st.markdown("<h3 class='section-title'>USA Spending (Federal Contracts)</h3>", unsafe_allow_html=True)
+    render_federal_contracts_tab()
 
 # Close the main div
 st.markdown('</div>', unsafe_allow_html=True)
