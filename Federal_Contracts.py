@@ -706,7 +706,7 @@ class ContractTracker:
                     "Awarding Agency"
                 ],
                 "page": 1,
-                "limit": 10,  # Changed from 10 to 100 to match the table view
+                "limit": 10,
                 "sort": "Award Amount",
                 "order": "desc",
                 "subawards": False
@@ -732,7 +732,8 @@ class ContractTracker:
                             if not hasattr(self, '_stock_prices'):
                                 self._stock_prices = {}
                             if not stock_data.empty:
-                                self._stock_prices[date] = float(stock_data['Close'][0])
+                                # FIX: Use iloc instead of [] to access by position
+                                self._stock_prices[date] = float(stock_data['Close'].iloc[0])
                         
                         price = self._stock_prices.get(date)
                         
@@ -1641,6 +1642,7 @@ class ContractTracker:
             ])
             
             # Process each contract
+            impact_data = []  # Collect all impacts first
             for _, contract in contract_df.iterrows():
                 # Get contract ID
                 contract_id = contract['Award ID']
@@ -1668,8 +1670,12 @@ class ContractTracker:
                     'post_volume_avg': random.uniform(600000, 2500000)
                 }
                 
-                # Add to DataFrame
-                market_impact_df = pd.concat([market_impact_df, pd.DataFrame([impact])], ignore_index=True)
+                # Add to our collection
+                impact_data.append(impact)
+            
+            # Create DataFrame from all impacts at once instead of concatenating
+            if impact_data:
+                market_impact_df = pd.DataFrame(impact_data)
             
             # Save to CSV file
             os.makedirs('data', exist_ok=True)
@@ -1727,7 +1733,8 @@ class ContractTracker:
 
 # ------------------------------------------------------------------
 def render_federal_contracts_tab():
-    st.title("Federal Contracts Analysis")
+    # Remove this title line since we already have it in the standalone code
+    # st.title("Federal Contracts Analysis")
     tracker = ContractTracker()
 
     # Create tabs for different analysis steps
@@ -2031,85 +2038,48 @@ def render_federal_contracts_tab():
 
 
 # ------------------------------------------------------------------
-def main():
-    tracker = ContractTracker()
-    tracker.run_analysis_pipeline()
-
-    
-    # Fetch stock data
-    stock_data = tracker.fetch_stock_data()
-    
-    # Create visualization
-    fig1, fig2 = tracker.create_timeline_visualization(stock_data)
-    fig1.show()
-    fig2.show()
-    
-    # Generate stakeholder report
-    stakeholder_report = tracker.generate_stakeholder_report()
-    print(stakeholder_report)
-
-    # --- Demonstration: Fetch USA Spending Awards Data ---
-
-    # Define payload for /api/v2/search/spending_by_transaction/
-    transaction_search_payload = {
-        "filters": {
-            "award_type_codes": ["A", "B", "C", "D"] # Example: Contracts
-        },
-        "fields": ["generated_internal_id", "Transaction Amount"], # Request generated_internal_id and Transaction Amount
-        "limit": 10,
-        "sort": "Transaction Amount",
-        "order": "desc"
-    }
-
-    # Fetch and save recipient data
-    recipient_data = tracker.fetch_recipient_data()
-
-    # Fetch and save agency references
-    agency_data = tracker.fetch_agency_references()
-
-    # Fetch and save bulk historical data
-    bulk_data = tracker.download_bulk_historical_data()
-
-    # Fetch and save award federal accounts and last updated (not saving last updated to CSV as per previous agreement, only federal accounts)
-    award_details = tracker.fetch_award_details(tracker.contract_data.get('id', ''))
-
-    # Fetch generated_internal_ids and save transaction search results
-    transaction_search_results = tracker.fetch_generated_internal_ids_from_transaction_search(payload=transaction_search_payload)
-
-    all_award_details = [] # Initialize list to store all award details
-    generated_internal_ids_from_transaction_search = []
-    if transaction_search_results and 'results' in transaction_search_results:
-        generated_internal_ids_from_transaction_search = [item.get('generated_internal_id') for item in transaction_search_results['results'] if item.get('generated_internal_id')]
-
-        if generated_internal_ids_from_transaction_search:
-            print("\nFetched generated_internal_id from /api/v2/search/spending_by_transaction/ successfully!") # Updated print message
-            print(f"Number of generated_internal_id fetched: {len(generated_internal_ids_from_transaction_search)}") # Updated print message
-
-            # Fetch and print details for the first 2 generated_internal_ids for demonstration
-            print("\n--- Award Details fetched using generated_internal_id as Award ID from Transaction Search ---") # Updated print message
-            for fetched_generated_internal_id in generated_internal_ids_from_transaction_search[:2]: # Limit to first 2 for console output
-                award_details_by_id = tracker.fetch_award_details_by_id(fetched_generated_internal_id) # Using fetched_generated_internal_id as award_id
-                if award_details_by_id:
-                    print(f"\nAward Details for generated_internal_id (used as Award ID): {fetched_generated_internal_id}:") # Updated print message
-                    print("Award Details Keys:", award_details_by_id.keys()) # Print keys for summary
-                    all_award_details.append(award_details_by_id) # Append to list
-                else:
-                    print(f"Failed to fetch Award Details by ID for generated_internal_id (used as Award ID): {fetched_generated_internal_id}") # Updated print message
-        else:
-            print("\nNo generated_internal_id found in transaction search results.")
-    else:
-        print("\nFailed to fetch generated_internal_id from /api/v2/search/spending_by_transaction/ or no results found.")
-
-    tracker._save_all_award_details_to_csv(all_award_details) # Save all award details to CSV after fetching all
-    
-    # --- Demonstration: Market Impact Analysis ---
-    print("\n--- Market Impact Analysis ---")
-    analysis_results = tracker.analyze_market_impact(tracker.contract_data['symbol'], tracker.contract_data['awarded_date'])
-    print(analysis_results)
-
-    # Run the complete analysis pipeline
-    tracker.run_analysis_pipeline()
-
-
+# Add this new standalone entry point
 if __name__ == "__main__":
-    main()
+    import streamlit as st
+    
+    # Set page configuration
+    st.set_page_config(
+        page_title="Federal Contracts Analysis",
+        page_icon="🏢",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Add custom CSS for styling
+    st.markdown("""
+    <style>
+    .main-title {
+        font-size: 2.5rem;
+        color: #0066cc;
+        text-align: center;
+        margin-bottom: 1rem;
+    }
+    .section-title {
+        font-size: 1.5rem;
+        color: #004080;
+        margin-top: 1rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Main title
+    st.markdown("<h1 class='main-title'>Federal Contracts Analysis</h1>", unsafe_allow_html=True)
+    
+    # Add a brief description
+    st.markdown("""
+    This application analyzes federal contracts and their impact on stock prices. 
+    You can search for contracts by company name, analyze their market impact, 
+    generate AI analysis reports, and visualize contract timelines.
+    """)
+    
+    # Run the main function
+    render_federal_contracts_tab()
+    
+    # Add footer
+    st.markdown("---")
+    st.markdown("Federal Contracts Analysis Tool | Data sourced from USA Spending API")
