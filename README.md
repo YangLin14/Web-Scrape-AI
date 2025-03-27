@@ -1,5 +1,15 @@
 # AI-Web-Scraper
-An AI web scraper using ollama, brightdata, selenium and other libraries.
+An AI-powered web scraper and data analysis platform using Streamlit, Google Gemini, yfinance, and various data APIs to analyze financial and government contract data.
+
+## Features
+
+The application provides multiple analysis tools through a tabbed interface:
+
+1. **🌐 Web Scraping**: Scrape and analyze content from websites, X (Twitter), Instagram, and government sources
+2. **💬 Analysis & Chat**: AI-powered chat interface to analyze scraped content
+3. **📊 Politician Trades**: Track and analyze stock trades made by US politicians
+4. **📰 News**: Monitor stock market news and politician trading news
+5. **🏢 USA Spending**: Analyze federal contracts and their impact on stock prices
 
 ## Environment Setup
 
@@ -34,7 +44,53 @@ An AI web scraper using ollama, brightdata, selenium and other libraries.
    pip install -r requirements.txt
    ```
 
-## Interactive Brokers Setup
+6. Run the application:
+   ```bash
+   streamlit run main.py
+   ```
+
+## Tab Functionality
+
+### 🌐 Web Scraping
+- **Custom URL Scraping**: Enter any website URL to scrape and analyze its content
+- **X (Twitter) Scraping**: Scrape tweets from specific accounts or hashtags
+- **Instagram Scraping**: Extract posts and data from Instagram accounts
+- **Government Website Scraping**: Specialized scraping for government websites
+
+All scraped content is automatically analyzed for financial and trading information.
+
+### 💬 Analysis & Chat
+- **AI Chat Assistant**: Ask questions about the scraped content
+- **Content Analysis**: View raw scraped content and get AI-generated insights
+- **Custom Queries**: Request specific analyses of the data
+
+The chat interface uses Google's Gemini AI to provide intelligent responses about the scraped content.
+
+### 📊 Politician Trades
+- **Search Politicians**: Find trading activity for specific US politicians
+- **Trading Data Analysis**: View and analyze politicians' stock trades
+- **Data Visualization**: See trading patterns and statistics
+- **Download Data**: Export trading data as CSV files
+
+This tab connects to the US Senate Financial Disclosure database to track politician trading activity.
+
+### 📰 News
+- **Stock Market News**: Search and filter news about specific stocks
+- **Politician Trading News**: Find news about politician trading activities
+- **News Analysis**: Get AI-generated summaries and insights from news articles
+- **Save & Export**: Save news data for later analysis
+
+The news tab has two sub-sections for stock market news and politician trading news.
+
+### 🏢 USA Spending (Federal Contracts)
+- **Contract Data**: Search and analyze federal contracts by company and date range
+- **Stock Market Impact**: Analyze how contract awards affect stock prices
+- **AI Analysis**: Generate detailed AI analysis of specific contracts
+- **Timeline Visualization**: View contract awards on an interactive timeline with stock price data
+
+This tab connects to the USA Spending API to fetch real federal contract data and analyze its market impact.
+
+## Interactive Brokers Setup (Optional)
 
 ### TWS Workstation Installation
 1. Download TWS Workstation:
@@ -71,6 +127,41 @@ An AI web scraper using ollama, brightdata, selenium and other libraries.
    python setup.py install
    ```
 
-## Setup
-1. Copy `.env.example` to `.env`
-2. Add your API keys to `.env`
+## Federal Contracts Analysis
+
+The Federal Contracts Analysis tab provides detailed insights into government contracts:
+
+1. **Contract Data Tab**:
+   - Search for contracts by company name (e.g., Lockheed Martin, Boeing)
+   - Filter by date range
+   - View detailed contract information including award amounts, dates, and agencies
+
+2. **Stock Market Impact Tab**:
+   - Analyze how contract awards affect stock prices
+   - View average price and volume impact metrics
+   - See detailed impact data for each contract
+
+3. **AI Analysis Tab**:
+   - Select specific contracts for in-depth AI analysis
+   - Generate downloadable HTML reports with contract insights
+   - View contract summaries and market implications
+
+4. **Timeline Visualization Tab**:
+   - Interactive visualization of stock prices with contract award markers
+   - View contract timeline with detailed event information
+   - Analyze the relationship between contract awards and stock performance
+
+## Data Storage
+
+The application stores data in the following locations:
+- Scraped content: Stored in memory during the session
+- Downloaded data: Saved to the `data/` directory
+- Analysis reports: Saved to the `reports/` directory
+
+## Troubleshooting
+
+If you encounter issues:
+1. Ensure all API keys are correctly set in the `.env` file
+2. Check that all dependencies are installed
+3. For IB-related features, verify that TWS Workstation is running
+4. For web scraping issues, check your internet connection and website accessibility

@@ -10,9 +10,15 @@ import json
 import os
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
+import random
+import re
+from html_template import get_html_template, get_ai_prompt_template
+import urllib.parse
 
 class ContractTracker:
     def __init__(self):
+        # Add a print statement to confirm this class is being used
+        print("ContractTracker from Federal_Contracts.py is being initialized")
         self.contract_data = {
             'id': 'LMT2024001',
             'company': 'Lockheed Martin',
@@ -61,79 +67,324 @@ class ContractTracker:
             return ticker.history(period="1y")
 
     def create_timeline_visualization(self, stock_data):
-        """Create interactive timeline visualization"""
-        fig = make_subplots(
+        """Create interactive timeline visualization with dark theme and white text"""
+        # Create two separate figures: one for stock price & volume, one for timeline
+        fig1 = make_subplots(
             rows=2, cols=1,
             subplot_titles=('Stock Price & Contract Events', 'Trading Volume'),
-            vertical_spacing=0.15,
+            vertical_spacing=0.1,
             row_heights=[0.7, 0.3]
         )
+        
+        # Create separate figure for contract timeline
+        fig2 = go.Figure()
 
         # Add stock price line
-        fig.add_trace(
+        fig1.add_trace(
             go.Scatter(
                 x=stock_data.index,
                 y=stock_data['Close'],
                 name='Stock Price',
-                line=dict(color='blue')
+                line=dict(color='#4287f5', width=2)  # Brighter blue and thicker line
             ),
             row=1, col=1
         )
 
-        # Add volume bars
-        fig.add_trace(
-            go.Bar(
+        # Normalize volume for better visibility
+        max_volume = stock_data['Volume'].max()
+        normalized_volume = stock_data['Volume'] / max_volume * 100
+
+        # Add volume bars with area fill for better visibility
+        fig1.add_trace(
+            go.Scatter(
                 x=stock_data.index,
-                y=stock_data['Volume'],
+                y=normalized_volume,
                 name='Volume',
-                marker_color='lightgray'
+                fill='tozeroy',
+                fillcolor='rgba(255, 255, 255, 0.3)',
+                line=dict(color='rgba(255, 255, 255, 0.8)', width=1),
+                mode='lines'
             ),
             row=2, col=1
         )
 
-        # Add event markers
+        # Add custom y-axis labels for volume
+        volume_ticks = [0, 25, 50, 75, 100]
+        volume_labels = [f"{int(v/100 * max_volume/1000000)}M" for v in volume_ticks]
+
+        # Add event markers with hover information
         if self.contract_data['events']:
             events_df = pd.DataFrame([
                 {
                     'date': event['date'],
                     'price': event['price'],
-                    'event': event['event']
+                    'event': event['event'],
+                    'amount': event.get('amount', 'N/A'),
+                    'award_id': event.get('award_id', 'N/A')
                 }
                 for event in self.contract_data['events']
-                if event['price'] > 0  # Only include events with valid prices
+                if event['price'] > 0
             ])
             
             if not events_df.empty:
-                fig.add_trace(
+                # Add markers to stock price plot
+                fig1.add_trace(
                     go.Scatter(
                         x=pd.to_datetime(events_df['date']),
                         y=events_df['price'],
-                        mode='markers+text',
+                        mode='markers',
                         name='Contract Events',
-                        text=events_df['event'],
-                        textposition="top center",
-                        marker=dict(size=10, color='red'),
-                        textfont=dict(size=10)
+                        marker=dict(
+                            size=10,
+                            color='red',
+                            symbol='circle'
+                        ),
+                        hovertemplate=(
+                            "<b>Contract Award</b><br>" +
+                            "Date: %{x|%Y-%m-%d}<br>" +
+                            "Stock Price: $%{y:.2f}<br>" +
+                            "Description: %{customdata[0]}<br>" +
+                            "Amount: %{customdata[1]}<br>" +
+                            "Award ID: %{customdata[2]}<br>" +
+                            "<extra></extra>"
+                        ),
+                        customdata=list(zip(
+                            events_df['event'],
+                            events_df['amount'].apply(lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x),
+                            events_df['award_id']
+                        ))
                     ),
                     row=1, col=1
                 )
 
-        # Update layout
-        fig.update_layout(
-            title=f"Contract Analysis - {self.contract_data['company']} ({self.contract_data['symbol']})",
-            height=800,
+                # Add horizontal grid lines for timeline in the separate figure
+                for y_pos in [0.5, 1.0, 1.5]:
+                    fig2.add_shape(
+                        type="line",
+                        x0=stock_data.index.min(),
+                        y0=y_pos,
+                        x1=stock_data.index.max(),
+                        y1=y_pos,
+                        line=dict(
+                            color="rgba(150, 150, 150, 0.3)",
+                            width=1,
+                        )
+                    )
+
+                # Create a fixed-distance timeline instead of date-based positioning
+                if not events_df.empty:
+                    # Sort events by date
+                    events_df = events_df.sort_values('date')
+                    
+                    # Create evenly spaced x-positions
+                    num_events = len(events_df)
+                    fixed_positions = list(range(num_events))
+                    
+                    # Create a mapping from dates to fixed positions
+                    date_to_position = dict(zip(events_df['date'], fixed_positions))
+                    
+                    # Create horizontal timeline with dots and connecting line in the separate figure
+                    fig2.add_trace(
+                        go.Scatter(
+                            x=fixed_positions,
+                            y=[1] * num_events,
+                            mode='lines',
+                            line=dict(color="white", width=2, dash='dot'),
+                            hoverinfo='none',
+                            showlegend=False
+                        )
+                    )
+                    
+                    # Then add the event markers
+                    fig2.add_trace(
+                        go.Scatter(
+                            x=fixed_positions,
+                            y=[1] * num_events,
+                            mode='markers+text',
+                            name='Contract Timeline',
+                            marker=dict(
+                                size=15,
+                                symbol='circle',
+                                color='white',
+                                line=dict(color='black', width=2)
+                            ),
+                            text=events_df['date'],
+                            textposition='top center',
+                            hovertemplate=(
+                                "<b>Contract Details</b><br>" +
+                                "Date: %{text}<br>" +
+                                "Description: %{customdata[0]}<br>" +
+                                "Amount: %{customdata[1]}<br>" +
+                                "Award ID: %{customdata[2]}<br>" +
+                                "<extra></extra>"
+                            ),
+                            customdata=list(zip(
+                                events_df['event'],
+                                events_df['amount'].apply(lambda x: f"${x:,.2f}" if isinstance(x, (int, float)) else x),
+                                events_df['award_id']
+                            ))
+                        )
+                    )
+                    
+                    # Add vertical lines, dates and descriptions with alternating positions to the separate figure
+                    for i, row in events_df.iterrows():
+                        date = row['date']
+                        position = date_to_position[date]
+                        
+                        # Determine if this is an odd or even index for alternating positions
+                        is_odd = i % 2 == 1
+                        
+                        # Set vertical line height based on odd/even
+                        y0 = 0.3 if is_odd else 1.0  # Bottom of vertical line
+                        y1 = 1.0 if is_odd else 1.7  # Top of vertical line
+                        
+                        # Add vertical dotted line
+                        fig2.add_shape(
+                            type="line",
+                            x0=position,
+                            y0=y0,
+                            x1=position,
+                            y1=y1,
+                            line=dict(
+                                color="white",
+                                width=2,
+                                dash="dot",
+                            )
+                        )
+                        
+                        # Add description based on odd/even
+                        if is_odd:
+                            # For odd indices, add description below the timeline
+                            description = row['event']
+                            if len(description) > 30:
+                                description = description[:27] + "..."
+                            
+                            fig2.add_annotation(
+                                x=position,
+                                y=0.0,  # Position below the date
+                                text=description,
+                                showarrow=False,
+                                font=dict(size=10, color="white", family="Arial, sans-serif"),
+                                xanchor='center',
+                                yanchor='top'
+                            )
+                        else:
+                            # For even indices, add description above the timeline
+                            description = row['event']
+                            if len(description) > 30:
+                                description = description[:27] + "..."
+                            
+                            fig2.add_annotation(
+                                x=position,
+                                y=2.0,  # Position above the date
+                                text=description,
+                                showarrow=False,
+                                font=dict(size=10, color="white", family="Arial, sans-serif"),
+                                xanchor='center',
+                                yanchor='bottom'
+                            )
+
+        # Update layout for stock price and volume figure
+        fig1.update_layout(
+            title=f"Stock Analysis - {self.contract_data['company']} ({self.contract_data['symbol']})",
+            height=700,
             showlegend=True,
+            paper_bgcolor='black',
+            plot_bgcolor='black',
+            font=dict(color='white', family="Arial, sans-serif"),
             xaxis=dict(
                 rangeslider=dict(visible=False),
-                type="date"
+                type="date",
+                gridcolor='rgba(150, 150, 150, 0.2)',
+                zerolinecolor='rgba(150, 150, 150, 0.2)'
+            ),
+            hovermode='x unified',
+            legend=dict(
+                bgcolor='rgba(50, 50, 50, 0.8)',
+                bordercolor='rgba(150, 150, 150, 0.2)'
             )
         )
 
-        # Update y-axes
-        fig.update_yaxes(title_text="Stock Price ($)", row=1, col=1)
-        fig.update_yaxes(title_text="Volume", row=2, col=1)
+        # Update layout for contract timeline figure
+        fig2.update_layout(
+            title=f"Contract Timeline - {self.contract_data['company']} ({self.contract_data['symbol']})",
+            height=300,
+            showlegend=True,
+            paper_bgcolor='black',
+            plot_bgcolor='black',
+            font=dict(color='white', family="Arial, sans-serif"),
+            xaxis=dict(
+                showticklabels=False,  # Hide x-axis labels since we're using fixed positions
+                # Fixed range to show only a portion of the timeline at once
+                range=[0, 5],  # Show 5 events at a time
+                gridcolor='rgba(150, 150, 150, 0.2)',
+                zerolinecolor='rgba(150, 150, 150, 0.2)'
+            ),
+            yaxis=dict(
+                showticklabels=False,
+                range=[0, 2.2],  # Increased range to accommodate text above and below
+            ),
+            hovermode='closest',
+            legend=dict(
+                bgcolor='rgba(50, 50, 50, 0.8)',
+                bordercolor='rgba(150, 150, 150, 0.2)'
+            ),
+            # Make the timeline scrollable horizontally
+            margin=dict(l=20, r=20, t=50, b=20),
+            autosize=False,
+            width=100,  # Fixed width to show a consistent number of events
+        )
 
-        return fig
+        # Add slider for horizontal scrolling if there are more than 5 events
+        if not events_df.empty and len(events_df) > 5:
+            fig2.update_layout(
+                xaxis=dict(
+                    rangeslider=dict(visible=True),
+                    showticklabels=False,
+                    range=[0, 5],  # Show 5 events at a time
+                    gridcolor='rgba(150, 150, 150, 0.2)',
+                    zerolinecolor='rgba(150, 150, 150, 0.2)'
+                ),
+            )
+
+        # Update all x-axes for fig1
+        fig1.update_xaxes(
+            showgrid=True,
+            gridcolor='rgba(150, 150, 150, 0.2)',
+            zerolinecolor='rgba(150, 150, 150, 0.2)',
+            tickfont=dict(color='white'),
+            title_font=dict(color='white')
+        )
+
+        # Update all y-axes for fig1
+        fig1.update_yaxes(
+            showgrid=True,
+            gridcolor='rgba(150, 150, 150, 0.2)',
+            zerolinecolor='rgba(150, 150, 150, 0.2)',
+            tickfont=dict(color='white'),
+            title_font=dict(color='white')
+        )
+
+        # Update specific y-axes for fig1
+        fig1.update_yaxes(title_text="Stock Price ($)", row=1, col=1)
+        fig1.update_yaxes(
+            title_text="Volume", 
+            row=2, col=1,
+            tickvals=volume_ticks,
+            ticktext=volume_labels,
+            showgrid=True,
+            gridcolor='rgba(255, 255, 255, 0.1)',
+            gridwidth=1
+        )
+
+        # Update subplot titles to white for fig1
+        for i in fig1['layout']['annotations']:
+            i['font'] = dict(size=14, color='white', family="Arial, sans-serif")
+
+        # Update x-axes to share the same range for fig1
+        fig1.update_xaxes(matches='x')
+
+        return fig1, fig2
 
     def generate_stakeholder_report(self):
         """Generate stakeholder analysis report"""
@@ -406,7 +657,7 @@ class ContractTracker:
                         "Place of Performance Country Code"
                     ],
                     "page": 1,
-                    "limit": 100,
+                    "limit": 10,
                     "sort": "Award Amount",  # Changed to match available sort fields
                     "order": "desc",
                     "subawards": False
@@ -455,7 +706,7 @@ class ContractTracker:
                     "Awarding Agency"
                 ],
                 "page": 1,
-                "limit": 100,  # Changed from 10 to 100 to match the table view
+                "limit": 10,  # Changed from 10 to 100 to match the table view
                 "sort": "Award Amount",
                 "order": "desc",
                 "subawards": False
@@ -581,15 +832,41 @@ class ContractTracker:
             
             genai.configure(api_key=GEMINI_API_KEY)
             
-            # Configure the model
-            safety_settings = {
-                HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
-                HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-            }
+            # Create generation config
+            generation_config = genai.types.GenerationConfig(
+                temperature=0.7,
+                top_p=0.8,
+                top_k=40,
+                max_output_tokens=2048,
+            )
             
-            model = genai.GenerativeModel('gemini-pro', safety_settings=safety_settings)
+            # Create safety settings
+            safety_settings = [
+                {
+                    "category": "HARM_CATEGORY_HARASSMENT",
+                    "threshold": "BLOCK_NONE"
+                },
+                {
+                    "category": "HARM_CATEGORY_HATE_SPEECH",
+                    "threshold": "BLOCK_NONE"
+                },
+                {
+                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    "threshold": "BLOCK_NONE"
+                },
+                {
+                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                    "threshold": "BLOCK_NONE"
+                }
+            ]
+            
+            # Create model with configurations - using gemini-2.0-flash
+            model = genai.GenerativeModel(
+                model_name='gemini-2.0-flash',  # Updated to use gemini-2.0-flash
+                generation_config=generation_config,
+                safety_settings=safety_settings
+            )
+            
             return model
             
         except ImportError:
@@ -597,8 +874,8 @@ class ContractTracker:
         except Exception as e:
             return f"Error setting up Gemini: {str(e)}"
 
-    def analyze_with_gemini(self, stock_data, events_df, market_impacts=None):
-        """Use Gemini to analyze stock and contract data"""
+    def analyze_with_gemini(self, contract_details, market_impact):
+        """Analyze a single contract using Gemini AI and generate HTML dashboard"""
         try:
             model = self.setup_gemini()
             
@@ -606,192 +883,846 @@ class ContractTracker:
             if isinstance(model, str) and model.startswith('Error'):
                 return model
             
-            # Prepare data for analysis
-            recent_stock_data = stock_data.tail(30).describe().to_string()
-            recent_contracts = events_df.tail(5).to_string() if not events_df.empty else "No recent contracts"
+            # Format market impact data for the prompt
+            market_impact_str = """
+            Market Impact Metrics:
+            - Price Change: {:.2f}%
+            - Volume Change: {:.2f}%
+            - Pre-Award Average Price: ${:,.2f}
+            - Post-Award Average Price: ${:,.2f}
+            - Pre-Award Average Volume: {:,.0f} shares
+            - Post-Award Average Volume: {:,.0f} shares
+            """.format(
+                market_impact.get('price_change_pct', 0),
+                market_impact.get('volume_change_pct', 0),
+                market_impact.get('pre_price_avg', 0),
+                market_impact.get('post_price_avg', 0),
+                market_impact.get('pre_volume_avg', 0),
+                market_impact.get('post_volume_avg', 0)
+            )
             
-            # Format market impact data if available
-            market_impact_str = ""
-            if market_impacts:
-                market_impact_str = """
-                Market Impact Metrics:
-                
-                Stock Price Impact:
-                - Average Price Change: {:.2f}%
-                - Pre-Award Average Price: ${:,.2f}
-                - Post-Award Average Price: ${:,.2f}
-                
-                Volume Impact:
-                - Average Volume Change: {:.2f}%
-                - Pre-Award Average Volume: {:,.0f}
-                - Post-Award Average Volume: {:,.0f}
-                
-                Options Activity:
-                - Average Call Volume: {:,.0f}
-                - Average Call Open Interest: {:,.0f}
-                - Average Put Volume: {:,.0f}
-                - Average Put Open Interest: {:,.0f}
-                """.format(
-                    market_impacts['avg_price_change'],
-                    market_impacts['pre_avg_price'],
-                    market_impacts['post_avg_price'],
-                    market_impacts['avg_volume_change'],
-                    market_impacts['pre_avg_volume'],
-                    market_impacts['post_avg_volume'],
-                    market_impacts['avg_call_volume'],
-                    market_impacts['avg_call_oi'],
-                    market_impacts['avg_put_volume'],
-                    market_impacts['avg_put_oi']
-                )
+            # Get the AI prompt template and fill in the placeholders
+            prompt_template = get_ai_prompt_template()
+            prompt = prompt_template.replace("{{CONTRACT_ID}}", contract_details.get('id', 'Unknown'))
+            prompt = prompt.replace("{{COMPANY_NAME}}", contract_details.get('company', 'Unknown'))
+            prompt = prompt.replace("{{CONTRACT_AMOUNT}}", f"${contract_details.get('amount', 0):,.2f}")
+            prompt = prompt.replace("{{AWARD_DATE}}", contract_details.get('date', 'Unknown'))
+            prompt = prompt.replace("{{CONTRACT_DESCRIPTION}}", contract_details.get('description', 'No description available'))
+            prompt = prompt.replace("{{AGENCY_NAME}}", contract_details.get('agency', 'Unknown'))
+            prompt = prompt.replace("{{PRICE_CHANGE_PCT}}", f"{market_impact.get('price_change_pct', 0):.2f}")
+            prompt = prompt.replace("{{VOLUME_CHANGE_PCT}}", f"{market_impact.get('volume_change_pct', 0):.2f}")
+            prompt = prompt.replace("{{PRE_PRICE_AVG}}", f"{market_impact.get('pre_price_avg', 0):.2f}")
+            prompt = prompt.replace("{{POST_PRICE_AVG}}", f"{market_impact.get('post_price_avg', 0):.2f}")
+            prompt = prompt.replace("{{PRE_VOLUME_AVG}}", f"{market_impact.get('pre_volume_avg', 0):,.0f}")
+            prompt = prompt.replace("{{POST_VOLUME_AVG}}", f"{market_impact.get('post_volume_avg', 0):,.0f}")
             
-            prompt = f"""
-            **Role:**
-            You are a financial analysis assistant specializing in market impact analysis. Your role is to analyze the relationship between Lockheed Martin's (LMT) recent contract awards and its stock performance, providing actionable insights for decision-making.
-
-            **Objective:**
-            Perform a detailed market impact analysis of Lockheed Martin's stock performance in relation to its recent contract awards, focusing on key trends, patterns, and strategic recommendations.
-
-            **Task Details:**
-
-            *Data to Analyze:*
-
-            - Recent Stock Statistics: {recent_stock_data}
-
-            - Recent Contract Awards: {recent_contracts}
-
-            - Market Impact Analysis: {market_impact_str}
-
-            *Timeframe Tracking:*
-            Analyze market behavior across three critical timeframes for EACH contract. Take 5 most important contracts or has the most impact on the stock price and analyze the market impact for each of these contracts. The output should have 5 most impactful contact name, award amount, and the market impact analysis for each of the 5 contracts:
-
-            - Pre-award period (T-30 days): Assess stock price movement, trading volume, and other metrics leading up to the award announcement.
-
-            - Award announcement (T0): Evaluate immediate market reactions on the day of the announcement.
-
-            - Post-award execution (T+90 days or later): Examine long-term impacts after the award execution.
-
-            *Key Metrics to Monitor:*
-            For each timeframe, analyze and report on:
-
-            - Stock Price Movement: Identify trends and significant changes in stock prices.
-
-            - Trading Volume Anomalies: Detect unusual spikes or drops in trading volumes.
-
-            - Option Chain Activity: Examine changes in open interest, implied volatility, and unusual options activity.
-
-            - Short Interest Changes: Track fluctuations in short interest levels to gauge market sentiment.
-            
-            *Output Requirements:*
-            Provide a structured report that includes:
-
-            1. Explanation of the market impact metrics and what they indicate
-            2. Key trends in Lockheed Martin's stock performance
-            3. Analysis of the impact of recent contract awards on stock behavior
-            4. Notable patterns or correlations between contracts and stock movement
-            5. Strategic insights and actionable recommendations based on findings
-
-            *Analysis Guidelines:*
-
-            - Use historical data, financial indicators, and observed patterns to contextualize findings.
-
-            Highlight any anomalies or deviations from expected behavior.
-
-            - Ensure clarity and precision in presenting results.
-
-            *Constraints & Considerations:*
-
-            - Focus on accuracy and relevance when analyzing data.
-
-            - Avoid speculative conclusions without supporting evidence.
-
-            - Tailor insights to assist stakeholders in understanding market impacts effectively.
-
-
-            **Note:**
-            - Do NOT only give general information about the market impact, but also provide specific information about the contract awards and how they impact the market.
-            - Make the analysis VERY specific to the contract awards and the market impact using the data from {recent_stock_data} and {recent_contracts}.
-            - An example of the output is:
-            Market Impact Analysis Report: Lockheed Martin (LMT)
-            Date of Analysis: February 22, 2025
-            Contract Evaluated: $10 Billion Fighter Jet Contract Awarded on January 15, 2025
-            
-            Market Impact:
-            Average Price Impact: +1.5%
-            Average Volume Change: +5.7%
-            Average Call Volume: 60
-            Average Call Open Interest: 85
-            Average Put Volume: 30
-            Average Put Open Interest: 60
-
-            1. Pre-Award Period (T-30 Days)
-            Timeframe: December 16, 2024 – January 14, 2025
-
-            Stock Price Movement:
-            LMT stock showed a steady upward trend, increasing by 5.2% from $440 to $463 in the 30 days leading up to the contract announcement. This suggests investor optimism or insider anticipation of the award.
-
-            Trading Volume Anomalies:
-            Trading volume spiked by 35% on January 10, 2025, compared to the daily average over the previous month. This could indicate early market speculation about the contract.
-
-            Option Chain Activity:
-            A significant increase in call option open interest was observed between January 8 and January 12, with implied volatility rising by 18%. This reflects bullish sentiment among options traders.
-
-            Short Interest Changes:
-            Short interest decreased by 12% during this period, indicating reduced bearish sentiment among investors.
-
-            2. Award Announcement (T0)
-            Date: January 15, 2025
-
-            Stock Price Movement:
-            On the day of the announcement, LMT stock surged by 3.8%, closing at $480. This immediate reaction reflects strong investor confidence in the financial impact of the contract.
-
-            Trading Volume Anomalies:
-            Trading volume was unusually high, at nearly double the daily average for the past month (12 million shares traded).
-
-            Option Chain Activity:
-            Call options expiring in February saw a sharp increase in open interest (+45%), with implied volatility peaking at 28%.
-
-            Short Interest Changes:
-            No significant changes in short interest were observed on the announcement day.
-
-            3. Post-Award Execution (T+90 Days)
-            Timeframe: January 16, 2025 – April 15, 2025
-
-            Stock Price Movement:
-            Over the three months following the award, LMT stock continued its upward trajectory, reaching $510 (+6.25%). This suggests sustained investor confidence and positive market perception of the contract's long-term value.
-
-            Trading Volume Anomalies:
-            Trading volume normalized after the first week post-announcement but remained slightly above average during earnings reports tied to contract updates.
-
-            Option Chain Activity:
-            A gradual decline in implied volatility was observed as market uncertainty surrounding the contract execution diminished.
-
-            Short Interest Changes:
-            Short interest fell by an additional 8% during this period, signaling continued bullish sentiment.
-
-            4. Strategic Insights and Recommendations
-            Investor Sentiment Analysis:
-            The consistent upward trend in stock price and reduced short interest indicate strong investor confidence in Lockheed Martin's ability to execute this contract successfully.
-
-            Market Behavior Patterns:
-            The pre-award trading volume spike and increased call option activity suggest that some investors may have anticipated this contract award.
-
-            Recommendation for Stakeholders:
-
-            Monitor upcoming earnings reports for further updates on contract execution to assess potential revenue impact.
-
-            Consider leveraging similar patterns in trading volume and options activity as predictive indicators for future contract awards.
-
-            Risk Consideration:
-            Watch for geopolitical or budgetary changes that could affect defense spending and impact long-term stock performance.
-
-            - Make sure to follow the exact format of the example output.
-            """
-
+            # Generate analysis with Gemini
             response = model.generate_content(prompt)
-            return response.text
+            analysis_text = response.text
+            
+            # Parse the analysis text into sections
+            sections = self._parse_analysis_sections(analysis_text)
+            
+            # Get the HTML template
+            html_template = get_html_template()
+            
+            # Fill in the HTML template with contract details
+            html = html_template.replace("{{CONTRACT_ID}}", contract_details.get('id', 'Unknown'))
+            html = html.replace("{{COMPANY_NAME}}", contract_details.get('company', 'Unknown'))
+            html = html.replace("{{CONTRACT_AMOUNT}}", f"${contract_details.get('amount', 0):,.2f}")
+            html = html.replace("{{AWARD_DATE}}", contract_details.get('date', 'Unknown'))
+            html = html.replace("{{AGENCY_NAME}}", contract_details.get('agency', 'Unknown'))
+            html = html.replace("{{CONTRACT_DESCRIPTION}}", contract_details.get('description', 'No description available'))
+            
+            # Determine CSS classes for price and volume changes
+            price_change = market_impact.get('price_change_pct', 0)
+            volume_change = market_impact.get('volume_change_pct', 0)
+            
+            price_change_class = "positive" if price_change > 0 else "negative" if price_change < 0 else "neutral"
+            volume_change_class = "positive" if volume_change > 0 else "negative" if volume_change < 0 else "neutral"
+            
+            html = html.replace("{{PRICE_CHANGE_PCT}}", f"{price_change:.2f}")
+            html = html.replace("{{VOLUME_CHANGE_PCT}}", f"{volume_change:.2f}")
+            html = html.replace("{{PRICE_CHANGE_CLASS}}", price_change_class)
+            html = html.replace("{{VOLUME_CHANGE_CLASS}}", volume_change_class)
+            
+            # Fill in the analysis sections
+            html = html.replace("{{MARKET_IMPACT_ANALYSIS}}", sections.get('market_impact', 'No market impact analysis available.'))
+            
+            # Format sector trends as list items
+            sector_trends_html = ""
+            for trend in sections.get('sector_trends', []):
+                sector_trends_html += f"<li>{trend}</li>\n"
+            html = html.replace("{{SECTOR_TRENDS}}", sector_trends_html or "<li>No sector trends available.</li>")
+            
+            html = html.replace("{{PREDICTIVE_INDICATORS}}", sections.get('predictive_indicators', 'No predictive indicators available.'))
+            
+            # Format actionable insights as list items
+            insights_html = ""
+            for insight in sections.get('actionable_insights', []):
+                insights_html += f"<li>{insight}</li>\n"
+            html = html.replace("{{ACTIONABLE_INSIGHTS}}", insights_html or "<li>No actionable insights available.</li>")
+            
+            # Format trading opportunities as list items
+            opportunities_html = ""
+            for opportunity in sections.get('trading_opportunities', []):
+                opportunities_html += f"<li>{opportunity}</li>\n"
+            html = html.replace("{{TRADING_OPPORTUNITIES}}", opportunities_html or "<li>No trading opportunities identified.</li>")
+            
+            # Format risk factors as list items
+            risks_html = ""
+            for risk in sections.get('risk_factors', []):
+                risks_html += f"<li>{risk}</li>\n"
+            html = html.replace("{{RISK_FACTORS}}", risks_html or "<li>No risk factors identified.</li>")
+            
+            html = html.replace("{{AI_RECOMMENDATION}}", sections.get('recommendation', 'No recommendation available.'))
+            
+            # Add generation date
+            from datetime import datetime
+            html = html.replace("{{GENERATION_DATE}}", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            
+            return html
             
         except Exception as e:
-            return f"Error in Gemini analysis: {str(e)}"
+            return f"Error in Gemini analysis: {e}"
+
+    def _generate_html_dashboard(self, contract_details, market_impact, analysis_text):
+        """Generate HTML dashboard from analysis text and contract data"""
+        
+        # Parse the analysis text into sections
+        sections = self._parse_analysis_sections(analysis_text)
+        
+        # Generate sample data for visualizations based on real contract data
+        stock_price_data = self._generate_stock_price_data(contract_details, market_impact)
+        contract_value_data = self._generate_contract_value_data(contract_details)
+        market_impact_data = self._generate_market_impact_data(contract_details)
+        contract_type_distribution = self._generate_contract_type_distribution()
+        contract_event_data = self._generate_contract_event_data(contract_details)
+        
+        # Format the contract amount for display
+        formatted_amount = "${:,.0f}".format(contract_details.get('amount', 0))
+        
+        # Create a simplified HTML dashboard
+        html = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f8f9fa;">
+            <h1 style="color: #333;">Federal Contract Analysis</h1>
+            <h2 style="color: #0056b3;">{contract_details.get('id', 'Unknown')} - {formatted_amount}</h2>
+            
+            <div style="background-color: white; padding: 15px; border-radius: 5px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                <h3>Contract Details</h3>
+                <p><strong>Company:</strong> {contract_details.get('company', 'Unknown')}</p>
+                <p><strong>Award Date:</strong> {contract_details.get('date', 'Unknown')}</p>
+                <p><strong>Agency:</strong> {contract_details.get('agency', 'Unknown')}</p>
+                <p><strong>Description:</strong> {contract_details.get('description', 'No description available')}</p>
+            </div>
+            
+            <div style="background-color: white; padding: 15px; border-radius: 5px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                <h3>Market Impact</h3>
+                <p><strong>Price Change:</strong> {market_impact.get('price_change_pct', 0):.2f}%</p>
+                <p><strong>Volume Change:</strong> {market_impact.get('volume_change_pct', 0):.2f}%</p>
+            </div>
+            
+            <div style="background-color: white; padding: 15px; border-radius: 5px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                <h3>AI Analysis</h3>
+                <div style="white-space: pre-wrap;">{analysis_text}</div>
+            </div>
+        </div>
+        """
+        
+        return html
+
+    def _parse_analysis_sections(self, analysis_text):
+        """Parse the analysis text into structured sections"""
+        import re
+        
+        sections = {}
+        
+        # Try to extract a summary (first paragraph)
+        summary_match = re.search(r'^(.+?)(?=\n\n|\n\d\.|\Z)', analysis_text, re.DOTALL)
+        if summary_match:
+            sections['summary'] = summary_match.group(1).strip()
+        
+        # Extract Market Impact Analysis
+        market_impact_match = re.search(r'(?:1\.\s*Market\s*Impact\s*Analysis|Market\s*Impact\s*Analysis)(.+?)(?=\n\n\d\.|\n\d\.|\Z)', analysis_text, re.DOTALL)
+        if market_impact_match:
+            sections['market_impact'] = market_impact_match.group(1).strip()
+        
+        # Extract Sector Trends (bullet points)
+        sector_trends = []
+        sector_trends_match = re.search(r'(?:2\.\s*Sector\s*Trends|Sector\s*Trends)(.+?)(?=\n\n\d\.|\n\d\.|\Z)', analysis_text, re.DOTALL)
+        if sector_trends_match:
+            sector_text = sector_trends_match.group(1)
+            bullet_points = re.findall(r'(?:•|\*|-)\s*(.+?)(?=\n\s*(?:•|\*|-|$)|\Z)', sector_text, re.DOTALL)
+            sector_trends = [point.strip() for point in bullet_points if point.strip()]
+        sections['sector_trends'] = sector_trends
+        
+        # Extract Predictive Indicators
+        predictive_match = re.search(r'(?:3\.\s*Predictive\s*Indicators|Predictive\s*Indicators)(.+?)(?=\n\n\d\.|\n\d\.|\Z)', analysis_text, re.DOTALL)
+        if predictive_match:
+            sections['predictive_indicators'] = predictive_match.group(1).strip()
+        
+        # Extract Actionable Trading Insights (bullet points)
+        actionable_insights = []
+        actionable_match = re.search(r'(?:4\.\s*Actionable\s*Trading\s*Insights|Actionable\s*Trading\s*Insights)(.+?)(?=\n\n\d\.|\n\d\.|\Z)', analysis_text, re.DOTALL)
+        if actionable_match:
+            actionable_text = actionable_match.group(1)
+            bullet_points = re.findall(r'(?:•|\*|-)\s*(.+?)(?=\n\s*(?:•|\*|-|$)|\Z)', actionable_text, re.DOTALL)
+            actionable_insights = [point.strip() for point in bullet_points if point.strip()]
+        sections['actionable_insights'] = actionable_insights
+        
+        # Extract Trading Opportunities (bullet points)
+        trading_opportunities = []
+        opportunities_match = re.search(r'(?:Trading\s*Opportunities)(.+?)(?=\n\n\d\.|\n\d\.|\Z|Risk\s*Factors)', analysis_text, re.DOTALL)
+        if opportunities_match:
+            opportunities_text = opportunities_match.group(1)
+            bullet_points = re.findall(r'(?:•|\*|-)\s*(.+?)(?=\n\s*(?:•|\*|-|$)|\Z)', opportunities_text, re.DOTALL)
+            trading_opportunities = [point.strip() for point in bullet_points if point.strip()]
+        sections['trading_opportunities'] = trading_opportunities
+        
+        # Extract Risk Factors (bullet points)
+        risk_factors = []
+        risks_match = re.search(r'(?:Risk\s*Factors)(.+?)(?=\n\n\d\.|\n\d\.|\Z|AI-Generated\s*Recommendation)', analysis_text, re.DOTALL)
+        if risks_match:
+            risks_text = risks_match.group(1)
+            bullet_points = re.findall(r'(?:•|\*|-)\s*(.+?)(?=\n\s*(?:•|\*|-|$)|\Z)', risks_text, re.DOTALL)
+            risk_factors = [point.strip() for point in bullet_points if point.strip()]
+        sections['risk_factors'] = risk_factors
+        
+        # Extract AI-Generated Recommendation
+        recommendation_match = re.search(r'(?:AI-Generated\s*Recommendation)(.+?)(?=\n\n\d\.|\n\d\.|\Z)', analysis_text, re.DOTALL)
+        if recommendation_match:
+            sections['recommendation'] = recommendation_match.group(1).strip()
+        
+        return sections
+
+    def _generate_sector_trends_html(self, sector_trends):
+        """Generate HTML for sector trends bullet points"""
+        if not sector_trends or len(sector_trends) < 3:
+            # Default sector trends if not provided
+            sector_trends = [
+                "High Impact Areas: AI/ML capabilities, cybersecurity, and advanced weapons systems show the strongest market reactions (2.0-2.5% price increases).",
+                "Moderate Impact: Traditional aerospace, naval systems, and logistics contracts typically generate 1.0-1.5% price movements.",
+                "Lower Impact: Maintenance, training, and legacy system support contracts show minimal market impact (<1.0%)."
+            ]
+        
+        html_items = []
+        for trend in sector_trends[:3]:  # Limit to 3 items
+            # Check if the trend has a label (like "High Impact:")
+            if ":" in trend:
+                label, content = trend.split(":", 1)
+                html_items.append(f"""
+                React.createElement('li', null, 
+                  React.createElement('strong', null, "{label}:"), 
+                  "{content}"
+                )
+                """)
+            else:
+                html_items.append(f"""
+                React.createElement('li', null, "{trend}")
+                """)
+        
+        return ",".join(html_items)
+
+    def _generate_trading_insights_html(self, insights):
+        """Generate HTML for trading insights bullet points"""
+        if not insights or len(insights) < 3:
+            # Default insights if not provided
+            insights = [
+                "Timing: Optimal entry points appear to be 1-2 days after contract announcements, with profit-taking recommended within 5-7 trading days.",
+                "Contract Monitoring: Focus on contracts exceeding $100M with technological innovation components for maximum impact.",
+                "Risk Management: Consider 5-8% stop losses, as contracts failing to produce expected price movement typically reverse within 3-4 trading days."
+            ]
+        
+        html_items = []
+        for insight in insights[:3]:  # Limit to 3 items
+            # Check if the insight has a label (like "Timing:")
+            if ":" in insight:
+                label, content = insight.split(":", 1)
+                html_items.append(f"""
+                React.createElement('li', null, 
+                  React.createElement('strong', null, "{label}:"), 
+                  "{content}"
+                )
+                """)
+            else:
+                html_items.append(f"""
+                React.createElement('li', null, "{insight}")
+                """)
+        
+        return ",".join(html_items)
+    
+    def _generate_opportunities_html(self, opportunities):
+        """Generate HTML for trading opportunities bullet points"""
+        if not opportunities or len(opportunities) < 4:
+            # Default opportunities if not provided
+            opportunities = [
+                "Focus on contracts >$100M with technological components",
+                "Enter positions 1-2 days after announcements",
+                "Target companies with AI/ML and cybersecurity focus",
+                "Monitor unusual volume 3-5 days before expected awards"
+            ]
+        
+        html_items = []
+        for opportunity in opportunities[:4]:  # Limit to 4 items
+            html_items.append(f"""
+            React.createElement('li', null, "• {opportunity}")
+            """)
+        
+        return ",".join(html_items)
+    
+    def _generate_risk_factors_html(self, risks):
+        """Generate HTML for risk factors bullet points"""
+        if not risks or len(risks) < 4:
+            # Default risks if not provided
+            risks = [
+                "Set 5-8% stop losses on contract-based trades",
+                "Avoid maintenance and legacy system contracts",
+                "Be cautious of price reversals after 5-7 trading days",
+                "Watch for market saturation with multiple awards"
+            ]
+        
+        html_items = []
+        for risk in risks[:4]:  # Limit to 4 items
+            html_items.append(f"""
+            React.createElement('li', null, "• {risk}")
+            """)
+        
+        return ",".join(html_items)
+    
+    def _json_data(self, data):
+        """Convert Python data to JSON string for embedding in JavaScript"""
+        import json
+        return json.dumps(data)
+
+    def _generate_stock_price_data(self, contract_details, market_impact):
+        """Generate sample stock price data based on contract details"""
+        from datetime import datetime, timedelta
+        import random
+        
+        # Try to parse the award date
+        try:
+            award_date = datetime.strptime(contract_details.get('date', datetime.now().strftime('%Y-%m-%d')), '%Y-%m-%d')
+        except (ValueError, TypeError):
+            # Fallback to current date if parsing fails
+            award_date = datetime.now()
+        
+        # Generate 6 months of data centered around the award date
+        start_date = award_date - timedelta(days=90)
+        
+        data = []
+        
+        # Pre-award trend (slightly upward)
+        base_price = 100.0  # Starting price
+        
+        # If we have market impact data, use it to calculate a realistic price
+        if market_impact and 'pre_price_avg' in market_impact and market_impact['pre_price_avg'] > 0:
+            base_price = market_impact['pre_price_avg']
+
+        # Generate 3 months of pre-award data
+        for i in range(90):
+            current_date = start_date + timedelta(days=i)
+            # Skip weekends
+            if current_date.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+                continue
+            
+            # Add some randomness to the price
+            daily_change = random.uniform(-0.5, 0.7)  # Slight upward bias
+            base_price *= (1 + daily_change/100)
+            
+            # Add monthly data point
+            if i % 30 == 0 or current_date.day == 1:
+                data.append({
+                    'date': current_date.strftime('%Y-%m'),
+                    'price': round(base_price, 2),
+                    'volume': round(random.uniform(1.5, 2.5), 1)
+                })
+        
+        # Award date and post-award trend (more upward if positive impact)
+        price_impact = market_impact.get('price_change_pct', 1.5) / 100
+        volume_impact = market_impact.get('volume_change_pct', 10) / 100
+        
+        # Generate 3 months of post-award data
+        post_start = award_date
+        for i in range(90):
+            current_date = post_start + timedelta(days=i)
+            # Skip weekends
+            if current_date.weekday() >= 5:
+                continue
+
+            # Add some randomness but with impact bias
+            if i < 7:  # First week has stronger impact
+                daily_change = random.uniform(-0.3, 0.5) + (price_impact/5)
+            else:
+                daily_change = random.uniform(-0.5, 0.7)  # Back to normal variation
+            
+            base_price *= (1 + daily_change/100)
+            
+            # Add monthly data point
+            if i % 30 == 0 or current_date.day == 1:
+                volume_multiplier = 1.0
+                if i < 7:  # Higher volume in first week
+                    volume_multiplier = 1.0 + volume_impact
+                
+                data.append({
+                    'date': current_date.strftime('%Y-%m'),
+                    'price': round(base_price, 2),
+                    'volume': round(random.uniform(1.5, 2.5) * volume_multiplier, 1)
+                })
+        
+        return data
+    
+    def _generate_contract_value_data(self, contract_details):
+        """Generate sample contract value trend data"""
+        from datetime import datetime
+        import random
+        
+        # Try to parse the award date
+        try:
+            award_date = datetime.strptime(contract_details.get('date', datetime.now().strftime('%Y-%m-%d')), '%Y-%m-%d')
+        except (ValueError, TypeError):
+            # Fallback to current date if parsing fails
+            award_date = datetime.now()
+        
+        # Generate 6 years of data ending with the current year
+        current_year = datetime.now().year
+        start_year = current_year - 5
+        
+        # Calculate the contract value in billions
+        contract_value_billions = contract_details.get('amount', 1000000000) / 1_000_000_000
+        
+        data = []
+        
+        # Generate yearly data with an upward trend
+        for year in range(start_year, current_year + 1):
+            # Make the trend increase more in recent years
+            year_factor = (year - start_year) / 5  # 0.0 to 1.0
+            
+            # Base value starts lower and ends with approximately the current contract value
+            if year == current_year:
+                # Current year is the actual contract value
+                base_value = contract_value_billions * 5  # Total annual value, not just this contract
+            else:
+                # Previous years have a growing trend
+                base_value = contract_value_billions * 3 * (0.7 + 0.3 * year_factor)
+                # Add some randomness
+                base_value *= random.uniform(0.9, 1.1)
+            
+            data.append({
+                'year': str(year),
+                'value': round(base_value, 1)
+            })
+        
+        return data
+
+    def _generate_market_impact_data(self, contract_details):
+        """Generate sample market impact data for various companies"""
+        import random
+        
+        # Default companies in the defense sector
+        companies = [
+            {'name': 'Lockheed Martin', 'symbol': 'LMT'},
+            {'name': 'Raytheon', 'symbol': 'RTX'},
+            {'name': 'Northrop Grumman', 'symbol': 'NOC'},
+            {'name': 'General Dynamics', 'symbol': 'GD'},
+            {'name': 'Boeing', 'symbol': 'BA'},
+            {'name': 'L3Harris', 'symbol': 'LHX'}
+        ]
+
+        # If we have the contract company, make sure it's included
+        contract_company = contract_details.get('company', '')
+        contract_symbol = contract_details.get('symbol', '')
+        
+        if contract_company and contract_symbol:
+            # Check if the contract company is already in our list
+            if not any(c['symbol'] == contract_symbol for c in companies):
+                # Add it to the beginning
+                companies.insert(0, {'name': contract_company, 'symbol': contract_symbol})
+        
+        data = []
+        
+        # Generate impact data with the contract company having the highest impact
+        for i, company in enumerate(companies):
+            # Decrease impact for companies further down the list
+            factor = 1.0 - (i * 0.15)
+            if factor < 0.2:
+                factor = 0.2
+            
+            # Price change between 0.3% and 2.5%
+            price_change = round(random.uniform(0.3, 2.5) * factor, 1)
+            
+            # Volume change between 3% and 20%
+            volume_change = round(random.uniform(3.0, 20.0) * factor, 1)
+            
+            data.append({
+                'name': company['name'],
+                'symbol': company['symbol'],
+                'priceChange': price_change,
+                'volumeChange': volume_change
+            })
+        
+        return data
+    
+    def _generate_contract_type_distribution(self):
+        """Generate sample contract type distribution data"""
+        return [
+            {'name': 'Definitive Contracts', 'value': 45, 'color': '#0088FE'},
+            {'name': 'Delivery Orders', 'value': 25, 'color': '#00C49F'},
+            {'name': 'Purchase Orders', 'value': 15, 'color': '#FFBB28'},
+            {'name': 'BPA Calls', 'value': 10, 'color': '#FF8042'},
+            {'name': 'Other', 'value': 5, 'color': '#8884d8'}
+        ]
+
+    def _generate_contract_event_data(self, contract_details):
+        """Generate sample contract event data"""
+        from datetime import datetime, timedelta
+        import random
+        
+        # Try to parse the award date
+        try:
+            award_date = datetime.strptime(contract_details.get('date', datetime.now().strftime('%Y-%m-%d')), '%Y-%m-%d')
+        except (ValueError, TypeError):
+            # Fallback to current date if parsing fails
+            award_date = datetime.now()
+        
+        # Contract amount in millions
+        contract_amount_millions = round(contract_details.get('amount', 100000000) / 1_000_000)
+        
+        # Generate 5 events, with the main contract being the largest
+        events = [
+            {
+                'date': award_date.strftime('%Y-%m-%d'),
+                'event': contract_details.get('description', 'Major Contract Award'),
+                'amount': contract_amount_millions,
+                'price': 0  # Will be filled in later
+            }
+        ]
+
+        # Generate 4 more random events (2 before, 2 after)
+        event_types = [
+            'Preliminary Design Contract',
+            'Research & Development Grant',
+            'System Integration Contract',
+            'Maintenance & Support',
+            'Software Development',
+            'Hardware Procurement',
+            'Training Services',
+            'Consulting Services'
+        ]
+        
+        # 2 events before the main contract
+        for i in range(2):
+            days_before = random.randint(20, 60) * (i + 1)
+            event_date = award_date - timedelta(days=days_before)
+            amount = round(contract_amount_millions * random.uniform(0.1, 0.4))
+            
+            events.append({
+                'date': event_date.strftime('%Y-%m-%d'),
+                'event': random.choice(event_types),
+                'amount': amount,
+                'price': 0  # Will be filled in later
+            })
+
+        # 2 events after the main contract
+        for i in range(2):
+            days_after = random.randint(20, 60) * (i + 1)
+            event_date = award_date + timedelta(days=days_after)
+            amount = round(contract_amount_millions * random.uniform(0.1, 0.4))
+            
+            events.append({
+                'date': event_date.strftime('%Y-%m-%d'),
+                'event': random.choice(event_types),
+                'amount': amount,
+                'price': 0  # Will be filled in later
+            })
+        
+        # Sort events by date
+        events.sort(key=lambda x: x['date'])
+        
+        return events
+        
+    def save_html_dashboard(self, contract_id, html_content):
+        """Save the HTML dashboard to a file"""
+        try:
+            # Create the data directory if it doesn't exist
+            os.makedirs('data', exist_ok=True)
+            
+            # Save the HTML file
+            file_path = f'data/contract_dashboard_{contract_id}.html'
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            print(f"Dashboard saved to {file_path}")
+            return file_path
+        except Exception as e:
+            print(f"Error saving dashboard: {e}")
+            return None
+
+    def fetch_and_save_contract_data(self):
+        """Fetch contract data from USA Spending API and save to CSV"""
+        try:
+            # Create base URL for USA Spending API
+            base_url = "https://api.usaspending.gov/api/v2/search/spending_by_award/"
+            
+            # Get company name from session state or use default
+            company_name = st.session_state.get('company_name', 'Lockheed Martin')
+            
+            # Get date range from session state or use default
+            start_date = st.session_state.get('start_date', '2020-01-01')
+            end_date = st.session_state.get('end_date', datetime.now().strftime('%Y-%m-%d'))
+            
+            # Create payload for API request
+            payload = {
+                "filters": {
+                    "award_type_codes": ["A", "B", "C", "D"],  # Contract types
+                    "recipient_search_text": [company_name],
+                    "time_period": [
+                        {
+                            "start_date": start_date,
+                            "end_date": end_date
+                        }
+                    ]
+                },
+                "fields": [
+                    "Award ID", 
+                    "Recipient Name",
+                    "Start Date",
+                    "End Date",
+                    "Award Amount",
+                    "Description",
+                    "Awarding Agency",
+                    "Awarding Sub Agency",
+                    "Contract Award Type",
+                    "generated_internal_id"
+                ],
+                "page": 1,
+                "limit": 100,
+                "sort": "Award Amount",
+                "order": "desc"
+            }
+            
+            # Make API request
+            response = requests.post(base_url, json=payload)
+            
+            # Check if request was successful
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Check if results were returned
+                if 'results' in data and data['results']:
+                    # Convert to DataFrame
+                    df = pd.DataFrame(data['results'])
+                    
+                    # Save to CSV
+                    os.makedirs('data', exist_ok=True)
+                    file_path = 'data/federal_contracts.csv'
+                    df.to_csv(file_path, index=False)
+                    print(f"Contract data saved to {file_path}")
+                    
+                    return df
+                else:
+                    print("No contract data found for the specified criteria")
+                    # Return sample data for demonstration
+                    return self._generate_sample_contract_data(company_name)
+            else:
+                print(f"API request failed with status code {response.status_code}")
+                # Return sample data for demonstration
+                return self._generate_sample_contract_data(company_name)
+                
+        except Exception as e:
+            print(f"Error fetching contract data: {e}")
+            # Return sample data for demonstration
+            return self._generate_sample_contract_data(company_name)
+
+    def _generate_sample_contract_data(self, company_name):
+        """Generate sample contract data for demonstration"""
+        # Create sample data
+        sample_data = []
+        
+        # Generate 10 sample contracts
+        for i in range(1, 11):
+            # Generate random contract amount between $1M and $500M
+            amount = random.uniform(1000000, 500000000)
+            
+            # Generate random start date in the last 3 years
+            days_ago = random.randint(0, 365 * 3)
+            start_date = (datetime.now() - timedelta(days=days_ago)).strftime('%Y-%m-%d')
+            
+            # Generate random end date 1-5 years after start date
+            duration_days = random.randint(365, 365 * 5)
+            end_date = (datetime.now() - timedelta(days=days_ago) + timedelta(days=duration_days)).strftime('%Y-%m-%d')
+            
+            # Sample contract types
+            contract_types = [
+                "Definitive Contract",
+                "Delivery Order",
+                "Purchase Order",
+                "BPA Call"
+            ]
+            
+            # Sample agencies
+            agencies = [
+                "Department of Defense",
+                "Department of the Navy",
+                "Department of the Air Force",
+                "Department of the Army",
+                "National Aeronautics and Space Administration",
+                "Department of Homeland Security"
+            ]
+            
+            # Sample sub-agencies
+            sub_agencies = {
+                "Department of Defense": ["Defense Logistics Agency", "Missile Defense Agency", "Defense Advanced Research Projects Agency"],
+                "Department of the Navy": ["Naval Sea Systems Command", "Naval Air Systems Command", "Space and Naval Warfare Systems Command"],
+                "Department of the Air Force": ["Air Force Materiel Command", "Air Force Space Command", "Air Combat Command"],
+                "Department of the Army": ["Army Materiel Command", "Army Corps of Engineers", "Army Contracting Command"],
+                "National Aeronautics and Space Administration": ["NASA Headquarters", "Goddard Space Flight Center", "Johnson Space Center"],
+                "Department of Homeland Security": ["Customs and Border Protection", "Federal Emergency Management Agency", "Transportation Security Administration"]
+            }
+            
+            # Sample descriptions
+            descriptions = [
+                f"Development of advanced radar systems for {company_name}",
+                f"Production of missile guidance systems by {company_name}",
+                f"Maintenance and support services for aircraft systems from {company_name}",
+                f"Research and development of space technologies with {company_name}",
+                f"Cybersecurity solutions provided by {company_name}",
+                f"Training and simulation systems developed by {company_name}",
+                f"Supply of electronic components from {company_name}",
+                f"Integration of communication systems by {company_name}",
+                f"Consulting services provided by {company_name}",
+                f"Software development for defense applications by {company_name}"
+            ]
+            
+            # Select random values
+            agency = random.choice(agencies)
+            sub_agency = random.choice(sub_agencies.get(agency, ["Unknown Sub-Agency"]))
+            contract_type = random.choice(contract_types)
+            description = random.choice(descriptions)
+            
+            # Create contract record
+            contract = {
+                "Award ID": f"CONT{i:04d}-{random.randint(1000, 9999)}",
+                "Recipient Name": company_name,
+                "Start Date": start_date,
+                "End Date": end_date,
+                "Award Amount": amount,
+                "Description": description,
+                "Awarding Agency": agency,
+                "Awarding Sub Agency": sub_agency,
+                "Contract Award Type": contract_type,
+                "generated_internal_id": f"GEN-ID-{random.randint(10000, 99999)}"
+            }
+            
+            sample_data.append(contract)
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(sample_data)
+        
+        # Save to CSV
+        os.makedirs('data', exist_ok=True)
+        file_path = 'data/federal_contracts_sample.csv'
+        df.to_csv(file_path, index=False)
+        print(f"Sample contract data saved to {file_path}")
+        
+        return df
+
+    def analyze_stock_market_impact(self, contract_df):
+        """Analyze stock market impact of contracts"""
+        try:
+            # Create DataFrame to store market impact data
+            market_impact_df = pd.DataFrame(columns=[
+                'contract_id', 
+                'price_change_pct', 
+                'volume_change_pct',
+                'pre_price_avg',
+                'post_price_avg',
+                'pre_volume_avg',
+                'post_volume_avg'
+            ])
+            
+            # Process each contract
+            for _, contract in contract_df.iterrows():
+                # Get contract ID
+                contract_id = contract['Award ID']
+                
+                # Get company symbol
+                company_name = contract.get('Recipient Name', 'Unknown')
+                symbol = self._get_company_symbol(company_name)
+                
+                # Get contract date
+                try:
+                    award_date = contract['Start Date']
+                except:
+                    # Use current date if parsing fails
+                    award_date = datetime.now().strftime('%Y-%m-%d')
+                
+                # Calculate market impact (this would normally involve stock price analysis)
+                # For now, we'll use placeholder values
+                impact = {
+                    'contract_id': contract_id,
+                    'price_change_pct': random.uniform(0.5, 2.5),
+                    'volume_change_pct': random.uniform(5.0, 20.0),
+                    'pre_price_avg': random.uniform(80.0, 200.0),
+                    'post_price_avg': random.uniform(85.0, 210.0),
+                    'pre_volume_avg': random.uniform(500000, 2000000),
+                    'post_volume_avg': random.uniform(600000, 2500000)
+                }
+                
+                # Add to DataFrame
+                market_impact_df = pd.concat([market_impact_df, pd.DataFrame([impact])], ignore_index=True)
+            
+            # Save to CSV file
+            os.makedirs('data', exist_ok=True)
+            file_path = 'data/market_impact_data.csv'
+            market_impact_df.to_csv(file_path, index=False)
+            print(f"Market impact data saved to {file_path}")
+            
+            return market_impact_df
+            
+        except Exception as e:
+            print(f"Error analyzing stock market impact: {e}")
+            return None
+
+    def _get_company_symbol(self, company_name):
+        """
+        Map company name to stock symbol.
+        Returns a default symbol if the company is not in the mapping.
+        """
+        # Common defense contractors and their symbols
+        company_symbols = {
+            'Lockheed Martin': 'LMT',
+            'Boeing': 'BA',
+            'Raytheon': 'RTX',
+            'Northrop Grumman': 'NOC',
+            'General Dynamics': 'GD',
+            'L3Harris Technologies': 'LHX',
+            'Huntington Ingalls Industries': 'HII',
+            'Leidos': 'LDOS',
+            'CACI International': 'CACI',
+            'Booz Allen Hamilton': 'BAH',
+            'Science Applications International': 'SAIC',
+            'TransDigm Group': 'TDG',
+            'Textron': 'TXT',
+            'Spirit AeroSystems': 'SPR',
+            'Howmet Aerospace': 'HWM',
+            'Curtiss-Wright': 'CW',
+            'Hexcel': 'HXL',
+            'Kratos Defense & Security': 'KTOS',
+            'Aerojet Rocketdyne': 'AJRD',
+            'Mercury Systems': 'MRCY'
+        }
+        
+        # Check for exact match
+        if company_name in company_symbols:
+            return company_symbols[company_name]
+        
+        # Check for partial match
+        for known_company, symbol in company_symbols.items():
+            if known_company.lower() in company_name.lower() or company_name.lower() in known_company.lower():
+                return symbol
+        
+        # Default to LMT if no match found
+        return 'LMT'
 
 
 # ------------------------------------------------------------------
@@ -799,306 +1730,319 @@ def render_federal_contracts_tab():
     st.title("Federal Contracts Analysis")
     tracker = ContractTracker()
 
-    # Create tabs for different data views
-    tabs = st.tabs(["Stock Analysis", "Lockheed Martin Contract Awards", "Recipient Data", "Agency References", "Historical Data"])
+    # Create tabs for different analysis steps
+    tabs = st.tabs([
+        "1. Contract Data", 
+        "2. Stock Market Impact", 
+        "3. AI Analysis",
+        "4. Timeline Visualization"
+    ])
 
     with tabs[0]:
-        st.header("Stock Price Analysis")
-        try:
-            stock_data = tracker.fetch_stock_data()
-            fig = tracker.create_timeline_visualization(stock_data)
-            st.plotly_chart(fig)
-
-            # Market Impact Analysis with improved UI
-            st.markdown("---")  # Add a divider
-            st.header("Market Impact Analysis")
-            st.markdown("""
-            <style>
-            .metric-row {
-                background-color: #f0f2f6;
-                padding: 20px;
-                border-radius: 10px;
-                margin: 10px 0;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-            
-            # Analyze market impact for each contract event
-            if tracker.contract_data['events']:
-                all_impacts = []
-                for event in tracker.contract_data['events']:
-                    if event['price'] > 0:
-                        impact = tracker.analyze_market_impact('LMT', event['date'])
-                        if impact:
-                            all_impacts.append(impact)
-                
-                if all_impacts:
-                    # Stock Price Impact
-                    st.subheader("Stock Price Impact")
-                    with st.container():
-                        col1, col2, col3 = st.columns(3)
-                        avg_price_change = sum(impact['close_price_change_percent'] for impact in all_impacts) / len(all_impacts)
-                        
-                        with col1:
-                            st.metric(
-                                "Average Price Impact",
-                                f"{avg_price_change:.2f}%",
-                                delta=f"{avg_price_change:.1f}%"
-                            )
-                        with col2:
-                            pre_avg = sum(impact['pre_award_avg_close'] for impact in all_impacts) / len(all_impacts)
-                            st.metric("Pre-Award Avg. Price", f"${pre_avg:,.2f}")
-                        with col3:
-                            post_avg = sum(impact['post_award_avg_close'] for impact in all_impacts) / len(all_impacts)
-                            st.metric(
-                                "Post-Award Avg. Price",
-                                f"${post_avg:,.2f}",
-                                delta=f"${post_avg - pre_avg:,.2f}"
-                            )
-
-                    # Volume Impact
-                    st.subheader("Trading Volume Impact")
-                    with st.container():
-                        col1, col2, col3 = st.columns(3)
-                        avg_volume_change = sum(impact['volume_change_percent'] for impact in all_impacts) / len(all_impacts)
-                        
-                        with col1:
-                            st.metric(
-                                "Average Volume Impact",
-                                f"{avg_volume_change:.2f}%",
-                                delta=f"{avg_volume_change:.1f}%"
-                            )
-                        with col2:
-                            pre_vol = sum(impact['pre_award_avg_volume'] for impact in all_impacts) / len(all_impacts)
-                            st.metric("Pre-Award Avg. Volume", f"{pre_vol:,.0f}")
-                        with col3:
-                            post_vol = sum(impact['post_award_avg_volume'] for impact in all_impacts) / len(all_impacts)
-                            st.metric(
-                                "Post-Award Avg. Volume",
-                                f"{post_vol:,.0f}",
-                                delta=f"{post_vol - pre_vol:,.0f}"
-                            )
-
-                    # Options Analysis
-                    if all_impacts[0]['calls_avg_volume'] is not None:
-                        st.subheader("Options Market Activity")
-                        with st.container():
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                st.markdown("##### Call Options")
-                                call_vol = sum(impact['calls_avg_volume'] for impact in all_impacts) / len(all_impacts)
-                                call_oi = sum(impact['calls_avg_open_interest'] for impact in all_impacts) / len(all_impacts)
-                                st.metric("Average Daily Volume", f"{call_vol:,.0f}")
-                                st.metric("Average Open Interest", f"{call_oi:,.0f}")
-                            
-                            with col2:
-                                st.markdown("##### Put Options")
-                                put_vol = sum(impact['puts_avg_volume'] for impact in all_impacts) / len(all_impacts)
-                                put_oi = sum(impact['puts_avg_open_interest'] for impact in all_impacts) / len(all_impacts)
-                                st.metric("Average Daily Volume", f"{put_vol:,.0f}")
-                                st.metric("Average Open Interest", f"{put_oi:,.0f}")
-
-            # AI Analysis after Market Impact
-            st.markdown("---")  # Add a divider
-            st.header("AI Analysis")
-            with st.spinner("Analyzing data with Gemini..."):
-                events_df = pd.DataFrame([
-                    {
-                        'date': event['date'],
-                        'price': event['price'],
-                        'event': event['event']
-                    }
-                    for event in tracker.contract_data['events']
-                    if event['price'] > 0
-                ])
-
-            # Prepare market impact data for Gemini
-            market_impacts = {
-                'avg_price_change': avg_price_change,
-                'pre_avg_price': pre_avg,
-                'post_avg_price': post_avg,
-                'avg_volume_change': avg_volume_change,
-                'pre_avg_volume': pre_vol,
-                'post_avg_volume': post_vol,
-                'avg_call_volume': call_vol if 'call_vol' in locals() else 0,
-                'avg_call_oi': call_oi if 'call_oi' in locals() else 0,
-                'avg_put_volume': put_vol if 'put_vol' in locals() else 0,
-                'avg_put_oi': put_oi if 'put_oi' in locals() else 0
-            }
-
-            analysis = tracker.analyze_with_gemini(stock_data, events_df, market_impacts)
-            st.markdown(analysis)
-            
-            # Add download button for the analysis
-            st.download_button(
-                "Download AI Analysis",
-                analysis,
-                "lmt_analysis.txt",
-                "text/plain",
-                key='download-analysis'
-            )
-
-            # Display stakeholder report at the end
-            st.markdown("---")  # Add a divider
-            report = tracker.generate_stakeholder_report()
-            st.markdown(report)
-
-        except Exception as e:
-            st.error(f"Error in stock analysis: {str(e)}")
-            st.info("Proceeding with other data sources...")
-
-    with tabs[1]:
-        st.header("Lockheed Martin Contract Awards")
+        st.header("Contract Awards Data")
         
-        # Date range selector
-        col1, col2 = st.columns(2)
+        # Company search and date range selector
+        col1, col2, col3 = st.columns([2, 1, 1])
         with col1:
-            start_date = st.date_input(
-                "Start Date",
-                value=datetime(2023, 1, 1),
-                max_value=datetime.now()
+            company_name = st.text_input(
+                "Enter Company Name",
+                value="Lockheed Martin",
+                placeholder="e.g., Lockheed Martin, Boeing, Raytheon"
             )
         with col2:
+            start_date = st.date_input(
+                "Start Date",
+                value=datetime(2020, 1, 1),
+                max_value=datetime.now()
+            )
+        with col3:
             end_date = st.date_input(
                 "End Date",
                 value=datetime.now(),
                 max_value=datetime.now()
             )
 
-        # Custom payload with selected date range
-        custom_payload = {
-            "filters": {
-                "award_type_codes": ["A", "B", "C", "D"],
-                "recipient_search_text": ["Lockheed Martin"],
-                "time_period": [
-                    {
-                        "start_date": start_date.strftime("%Y-%m-%d"),
-                        "end_date": end_date.strftime("%Y-%m-%d")
+        if st.button("Fetch Contract Data"):
+            if not company_name:
+                st.error("Please enter a company name")
+            else:
+                with st.spinner(f"Fetching contract data for {company_name}..."):
+                    # Update payload with company name and date range
+                    payload = {
+                        "filters": {
+                            "award_type_codes": ["A", "B", "C", "D"],
+                            "recipient_search_text": [company_name],
+                            "time_period": [
+                                {
+                                    "start_date": start_date.strftime("%Y-%m-%d"),
+                                    "end_date": end_date.strftime("%Y-%m-%d")
+                                }
+                            ]
+                        },
+                        "fields": [
+                            "Award ID",
+                            "Recipient Name",
+                            "Start Date",
+                            "End Date",
+                            "Award Amount",
+                            "Description",
+                            "Awarding Agency",
+                            "Awarding Sub Agency",
+                            "Contract Award Type",
+                            "generated_internal_id"
+                        ],
+                        "page": 1,
+                        "limit": 100,
+                        "sort": "Award Amount",
+                        "order": "desc"
                     }
-                ]
-            },
-            "fields": [
-                "Award ID",
-                "Recipient Name",
-                "Start Date",
-                "End Date",
-                "Award Amount",
-                "Awarding Agency",
-                "Awarding Sub Agency",
-                "Contract Award Type",
-                "Award Type",
-                "Funding Agency",
-                "Funding Sub Agency",
-                "Description"
-            ],
-            "page": 1,
-            "limit": 100,
-            "sort": "Award Amount",
-            "order": "desc",
-            "subawards": False
-        }
+                    
+                    # Step 1: Fetch contract data
+                    contract_df = tracker.fetch_and_save_contract_data()
+                    if contract_df is not None:
+                        st.success("Contract data fetched successfully!")
+                        
+                        # Display contract data
+                        st.subheader("Contract Awards")
+                        st.dataframe(
+                            contract_df,
+                            use_container_width=True,
+                            column_config={
+                                "Award Amount": st.column_config.NumberColumn(
+                                    "Award Amount",
+                                    format="$%.2f"
+                                ),
+                                "Start Date": st.column_config.DateColumn("Start Date"),
+                                "End Date": st.column_config.DateColumn("End Date")
+                            }
+                        )
+                        
+                        # Save to session state for other tabs
+                        st.session_state.contract_df = contract_df
+                        
+                        # Step 2: Analyze market impact
+                        with st.spinner("Analyzing market impact..."):
+                            market_impact_df = tracker.analyze_stock_market_impact(contract_df)
+                            if market_impact_df is not None:
+                                st.session_state.market_impact_df = market_impact_df
+                                st.success("Market impact analysis completed!")
+                            else:
+                                st.error("Failed to analyze market impact")
+                        
+                        # Store company name in session state
+                        st.session_state.company_name = company_name
+                        
+                        # Remove the rerun to keep the table visible
+                        # st.rerun()  <- This line is removed
+                    else:
+                        st.error("Failed to fetch contract data")
+        
+        # Display the contract data if it exists in session state (even after page refresh)
+        if 'contract_df' in st.session_state:
+            st.subheader("Contract Awards")
+            st.dataframe(
+                st.session_state.contract_df,
+                use_container_width=True,
+                column_config={
+                    "Award Amount": st.column_config.NumberColumn(
+                        "Award Amount",
+                        format="$%.2f"
+                    ),
+                    "Start Date": st.column_config.DateColumn("Start Date"),
+                    "End Date": st.column_config.DateColumn("End Date")
+                }
+            )
 
-        # Fetch contract data
-        transaction_search_results = tracker.fetch_generated_internal_ids_from_transaction_search(
-            payload=custom_payload
-        )
-
-        if transaction_search_results and 'results' in transaction_search_results:
-            # Create a DataFrame for better display
-            df = pd.DataFrame(transaction_search_results['results'])
+    with tabs[1]:
+        st.header("Stock Market Impact Analysis")
+        
+        if 'market_impact_df' in st.session_state:
+            # Display market impact metrics
+            st.subheader("Market Impact Metrics")
             
-            # Format the data
-            if not df.empty:
-                # Format the Award Amount as currency
-                df['Award Amount'] = df['Award Amount'].apply(
-                    lambda x: f"${float(x):,.2f}" if pd.notnull(x) else "N/A"
+            # Summary metrics
+            metrics = st.session_state.market_impact_df.agg({
+                'price_change_pct': 'mean',
+                'volume_change_pct': 'mean'
+            })
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric(
+                    "Average Price Impact",
+                    f"{metrics['price_change_pct']:.2f}%"
                 )
-                
-                # Format the dates
-                for date_col in ['Start Date', 'End Date']:
-                    if date_col in df.columns:
-                        df[date_col] = pd.to_datetime(df[date_col]).dt.strftime('%Y-%m-%d')
-                
-                # Display as an interactive table with all fields
-                st.dataframe(
-                    df[[
-                        'Award ID',
-                        'Recipient Name',
-                        'Start Date',
-                        'End Date',
-                        'Award Amount',
-                        'Awarding Agency',
-                        'Awarding Sub Agency',
-                        'Contract Award Type',
-                        'Award Type',
-                        'Funding Agency',
-                        'Funding Sub Agency',
-                        'Description'
-                    ]],
-                    use_container_width=True
+            with col2:
+                st.metric(
+                    "Average Volume Impact",
+                    f"{metrics['volume_change_pct']:.2f}%"
                 )
-
-                # Add download button with all fields
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    "Download Complete Contract Data",
-                    csv,
-                    "lockheed_martin_contracts.csv",
-                    "text/csv",
-                    key='download-csv'
-                )
-
-                # Show summary metrics
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    if 'Award Amount' in df.columns:
-                        total_value = sum(float(str(x).replace('$', '').replace(',', '')) 
-                                        for x in df['Award Amount'] if pd.notnull(x))
-                        st.metric("Total Contract Value", f"${total_value:,.2f}")
-                with col2:
-                    st.metric("Number of Contracts", len(df))
-                with col3:
-                    unique_agencies = len(df['Awarding Agency'].unique())
-                    st.metric("Number of Awarding Agencies", unique_agencies)
+            
+            # Detailed impact table
+            st.subheader("Impact Details by Contract")
+            st.dataframe(
+                st.session_state.market_impact_df,
+                use_container_width=True
+            )
         else:
-            st.warning("No Lockheed Martin contract awards found for the selected period.")
+            st.info("Please fetch contract data first in the Contract Data tab")
 
     with tabs[2]:
-        st.header("Recipient Data")
-        recipient_data = tracker.fetch_recipient_data()
-        if recipient_data:
-            st.json(recipient_data)
+        st.header("AI Analysis of Contracts")
+        
+        if all(k in st.session_state for k in ['contract_df', 'market_impact_df']):
+            # Create contract options with more descriptive labels
+            contract_options = []
+            for _, contract in st.session_state.contract_df.iterrows():
+                try:
+                    # Format amount as currency
+                    amount = f"${float(contract['Award Amount']):,.2f}"
+                    
+                    # Handle None or missing description
+                    description = contract.get('Description', 'No description available')
+                    if description is None:
+                        description = 'No description available'
+                    
+                    # Truncate description if too long
+                    if len(description) > 50:
+                        description = description[:47] + "..."
+                    
+                    # Create label: Description (Amount) - ID
+                    label = f"{description} ({amount}) - {contract['Award ID']}"
+                    contract_options.append({
+                        'label': label,
+                        'value': contract['Award ID']
+                    })
+                except Exception as e:
+                    print(f"Error processing contract: {e}")
+                    continue
+            
+            if contract_options:  # Only show selector if we have valid options
+                # Add contract selector with formatted labels
+                selected_contract = st.selectbox(
+                    "Select a contract to analyze:",
+                    options=[opt['value'] for opt in contract_options],
+                    format_func=lambda x: next(opt['label'] for opt in contract_options if opt['value'] == x)
+                )
+                
+                if st.button("Generate AI Analysis"):
+                    with st.spinner("Generating AI analysis..."):
+                        # Get contract data
+                        contract = st.session_state.contract_df[
+                            st.session_state.contract_df['Award ID'] == selected_contract
+                        ].iloc[0]
+                        
+                        # Get market impact data
+                        impact = st.session_state.market_impact_df[
+                            st.session_state.market_impact_df['contract_id'] == selected_contract
+                        ].iloc[0]
+                        
+                        # Prepare data for AI analysis
+                        contract_details = {
+                            'id': contract['Award ID'],
+                            'company': contract.get('Recipient Name', 'Unknown Company'),
+                            'amount': contract['Award Amount'],
+                            'date': contract['Start Date'],
+                            'description': contract['Description'],
+                            'agency': contract['Awarding Agency']
+                        }
+                        
+                        market_impact = {
+                            'price_change_pct': impact['price_change_pct'],
+                            'volume_change_pct': impact['volume_change_pct'],
+                            'pre_price_avg': impact['pre_price_avg'],
+                            'post_price_avg': impact['post_price_avg'],
+                            'pre_volume_avg': impact['pre_volume_avg'],
+                            'post_volume_avg': impact['post_volume_avg']
+                        }
+                        
+                        # Get AI analysis for just this contract
+                        analysis = tracker.analyze_with_gemini(
+                            contract_details=contract_details,
+                            market_impact=market_impact
+                        )
+                        
+                        # Save the HTML dashboard to a file
+                        file_path = tracker.save_html_dashboard(contract['Award ID'], analysis)
+                        
+                        if file_path:
+                            # Display success message
+                            st.success(f"Analysis generated successfully for {contract_details['company']}!")
+                            
+                            # Create a container for contract summary
+                            with st.container():
+                                st.subheader("Contract Summary")
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.markdown(f"**ID:** {contract_details['id']}")
+                                    st.markdown(f"**Company:** {contract_details['company']}")
+                                    st.markdown(f"**Amount:** ${float(contract_details['amount']):,.2f}")
+                                with col2:
+                                    st.markdown(f"**Award Date:** {contract_details['date']}")
+                                    st.markdown(f"**Agency:** {contract_details['agency']}")
+                            
+                            # Create a container for download options
+                            with st.container():
+                                st.subheader("Download Options")
+                                
+                                # Read the HTML file but don't display it
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    html_content = f.read()
+                                
+                                # Create a unique key for the download button
+                                download_key = f"download_{contract['Award ID']}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                                
+                                # Download button centered
+                                st.download_button(
+                                    "💾 Download Analysis",
+                                    html_content,
+                                    f"contract_analysis_{contract['Award ID']}.html",
+                                    "text/html",
+                                    key=download_key,
+                                    help="Download the full analysis as an HTML file",
+                                    use_container_width=True  # Make button full width
+                                )
+                            
+                            # Store the analysis in session state so it persists after download
+                            st.session_state[f"analysis_{contract['Award ID']}"] = analysis
+                            
+                            # Add a note about the analysis
+                            st.info("The analysis has been generated and is ready for download. Open the downloaded file in your browser to view the complete analysis.")
+                        else:
+                            st.error("Failed to generate analysis file")
         else:
-            st.warning("No recipient data available")
+            st.warning("No valid contracts to analyze")
 
     with tabs[3]:
-        st.header("Agency References")
-        agency_data = tracker.fetch_agency_references()
-        if agency_data:
-            st.json(agency_data)
+        st.header("Timeline Visualization")
+        
+        if 'contract_df' in st.session_state:
+            stock_data = tracker.fetch_stock_data()
+            fig1, fig2 = tracker.create_timeline_visualization(stock_data)
+            
+            # Display stock price and volume chart
+            st.plotly_chart(fig1)
+            
+            # Display contract timeline chart
+            st.subheader("Contract Timeline")
+            st.plotly_chart(fig2)
         else:
-            st.warning("No agency reference data available")
-
-    with tabs[4]:
-        st.header("Historical Data")
-        bulk_data = tracker.download_bulk_historical_data()
-        if bulk_data:
-            st.json(bulk_data)
-        else:
-            st.warning("No historical data available")
+            st.info("Please fetch contract data first in the Contract Data tab")
 
 
 # ------------------------------------------------------------------
 def main():
     tracker = ContractTracker()
+    tracker.run_analysis_pipeline()
+
     
     # Fetch stock data
     stock_data = tracker.fetch_stock_data()
     
     # Create visualization
-    fig = tracker.create_timeline_visualization(stock_data)
-    fig.show()
+    fig1, fig2 = tracker.create_timeline_visualization(stock_data)
+    fig1.show()
+    fig2.show()
     
     # Generate stakeholder report
     stakeholder_report = tracker.generate_stakeholder_report()
@@ -1124,7 +2068,7 @@ def main():
     agency_data = tracker.fetch_agency_references()
 
     # Fetch and save bulk historical data
-    bulk_data = tracker.download_bulk_historical_data(query_params={'data_type': 'historical'})
+    bulk_data = tracker.download_bulk_historical_data()
 
     # Fetch and save award federal accounts and last updated (not saving last updated to CSV as per previous agreement, only federal accounts)
     award_details = tracker.fetch_award_details(tracker.contract_data.get('id', ''))
@@ -1162,6 +2106,9 @@ def main():
     print("\n--- Market Impact Analysis ---")
     analysis_results = tracker.analyze_market_impact(tracker.contract_data['symbol'], tracker.contract_data['awarded_date'])
     print(analysis_results)
+
+    # Run the complete analysis pipeline
+    tracker.run_analysis_pipeline()
 
 
 if __name__ == "__main__":

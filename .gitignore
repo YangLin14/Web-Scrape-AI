@@ -3,3 +3,6 @@ chromedriver
 ai/
 IBJts/
 __pycache__/
+data/
+ref/
+Federal_Contracts_original/
